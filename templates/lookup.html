@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATJ Category Updater - Manual Lookup</title>
+<style>
+  /* ===== Dark theme (default) ===== */
+  :root, [data-theme="dark"] {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+    --accent: #4f8ef7; --accent2: #22d3a8; --warn: #f59e0b;
+    --danger: #ef4444; --success: #22c55e;
+    --text: #e2e8f0; --muted: #64748b;
+    --th-bg: #1e2030;
+    --hover-row: rgba(79,142,247,0.05);
+    --conf-high-bg: #14532d; --conf-med-bg: #422006; --conf-low-bg: #450a0a; --conf-err-bg: #334155;
+    --vector-bg: #2d1b69; --vector-text: #a78bfa;
+    --tag-bg: #2a2d3a;
+    --toggle-bg: var(--surface); --toggle-border: var(--border);
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+
+  /* ===== Light theme ===== */
+  [data-theme="light"] {
+    --bg: #f5f7fa; --surface: #ffffff; --border: #d1d5db;
+    --accent: #2563eb; --accent2: #059669; --warn: #d97706;
+    --danger: #dc2626; --success: #16a34a;
+    --text: #1e293b; --muted: #6b7280;
+    --th-bg: #e5e7eb;
+    --hover-row: rgba(37,99,235,0.05);
+    --conf-high-bg: #dcfce7; --conf-med-bg: #fef3c7; --conf-low-bg: #fee2e2; --conf-err-bg: #e5e7eb;
+    --vector-bg: #ede9fe; --vector-text: #7c3aed;
+    --tag-bg: #e5e7eb;
+    --toggle-bg: var(--surface); --toggle-border: var(--border);
+  }
+  [data-theme="light"] .conf-badge.high   { color: #15803d; }
+  [data-theme="light"] .conf-badge.medium { color: #b45309; }
+  [data-theme="light"] .conf-badge.low    { color: #dc2626; }
+  [data-theme="light"] .conf-badge.error  { color: #6b7280; }
+  [data-theme="light"] .badge { background: var(--accent); }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex; align-items: center; gap: 1rem;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.01em; }
+  .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; background: var(--accent); color: #fff; font-weight: 600; }
+
+  /* Theme toggle */
+  .theme-toggle {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--toggle-bg); border: 1px solid var(--toggle-border);
+    border-radius: 99px; padding: 3px 4px; cursor: pointer;
+    user-select: none;
+  }
+  .theme-toggle-option {
+    font-size: 0.72rem; font-weight: 600; padding: 4px 12px;
+    border-radius: 99px; transition: all .2s;
+    color: var(--muted);
+  }
+  .theme-toggle-option.active {
+    background: var(--accent); color: #fff;
+  }
+
+  nav {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border);
+  }
+  nav a {
+    padding: 0.7rem 1.5rem; font-size: 0.85rem; font-weight: 500;
+    color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  nav a:hover { color: var(--text); }
+  nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 0; min-height: calc(100vh - 100px); }
+
+  aside {
+    border-right: 1px solid var(--border);
+    padding: 1.5rem;
+    display: flex; flex-direction: column; gap: 1.5rem;
+    overflow-y: auto;
+  }
+
+  section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+  section.panel h2 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 1rem; }
+
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+  select {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 7px 10px; font-size: 0.85rem; font-family: var(--mono);
+  }
+  select:focus { outline: none; border-color: var(--accent); }
+
+  textarea {
+    width: 100%; height: 200px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 10px; font-size: 0.82rem; font-family: var(--mono);
+    resize: vertical; line-height: 1.6;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  textarea::placeholder { color: var(--muted); opacity: 0.6; }
+
+  .item-count { font-size: 0.75rem; color: var(--muted); margin-top: 6px; text-align: right; }
+  .item-count strong { color: var(--text); }
+
+  button.run-btn {
+    width: 100%; padding: 10px; border-radius: 8px; border: none; cursor: pointer;
+    background: var(--accent); color: #fff; font-weight: 600; font-size: 0.9rem;
+    transition: opacity .15s; margin-top: 8px;
+  }
+  button.run-btn:hover { opacity: 0.85; }
+  button.run-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .helper-btns { display: flex; gap: 6px; margin-top: 8px; }
+  .helper-btn {
+    flex: 1; padding: 6px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted); font-size: 0.72rem; cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .helper-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  .content { padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
+  .content h2 { font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+
+  /* Results toolbar */
+  .results-toolbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .results-toolbar .stat { font-size: 0.78rem; }
+  .results-toolbar .stat span { font-weight: 600; }
+  .results-toolbar .stat.high   span { color: var(--success); }
+  .results-toolbar .stat.medium span { color: var(--warn); }
+  .results-toolbar .stat.low    span { color: var(--danger); }
+
+  .export-btn {
+    background: var(--accent2); color: #fff; font-weight: 700; font-size: 0.8rem;
+    border: none; border-radius: 6px; padding: 8px 18px; cursor: pointer;
+    transition: opacity .15s; margin-left: auto;
+  }
+  .export-btn:hover { opacity: 0.85; }
+  .export-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .select-info { font-size: 0.75rem; color: var(--muted); }
+  .select-info strong { color: var(--text); }
+
+  /* Filter bar */
+  .filter-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .filter-bar label { display: inline; font-size: 0.75rem; color: var(--muted); margin: 0; }
+  .filter-bar select {
+    width: auto; min-width: 140px; font-size: 0.78rem; padding: 5px 8px;
+    font-family: var(--sans); border-radius: 6px;
+  }
+  .filter-bar .filter-count {
+    font-size: 0.73rem; color: var(--muted); margin-left: auto;
+  }
+  .filter-bar .filter-count strong { color: var(--text); }
+
+  /* Results table */
+  .results-table-wrap {
+    overflow-x: auto; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface); flex: 1;
+  }
+  .results-table {
+    width: 100%; border-collapse: collapse; font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .results-table th {
+    background: var(--th-bg); color: var(--muted); font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; padding: 8px 10px; text-align: left;
+    border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1;
+    font-size: 0.68rem;
+    cursor: pointer; user-select: none;
+    transition: color .15s;
+  }
+  .results-table th:hover { color: var(--text); }
+  .results-table th:first-child { cursor: default; }
+  .results-table th .sort-arrow {
+    display: inline-block; margin-left: 3px; font-size: 0.6rem;
+    opacity: 0.3; transition: opacity .15s;
+  }
+  .results-table th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+  .results-table td {
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+    max-width: 280px; overflow: hidden; text-overflow: ellipsis;
+    vertical-align: top;
+  }
+  .results-table tr:hover td { background: var(--hover-row); }
+  .results-table .wrap-cell { white-space: normal; word-break: break-word; }
+
+  /* Confidence badges in table */
+  .conf-badge {
+    display: inline-block; font-size: 0.68rem; font-weight: 700;
+    padding: 1px 7px; border-radius: 99px;
+  }
+  .conf-badge.high   { background: var(--conf-high-bg); color: var(--success); }
+  .conf-badge.medium { background: var(--conf-med-bg); color: var(--warn); }
+  .conf-badge.low    { background: var(--conf-low-bg); color: var(--danger); }
+  .conf-badge.error  { background: var(--conf-err-bg); color: var(--muted); }
+
+  .source-tag {
+    display: inline-block; font-size: 0.65rem; padding: 1px 6px;
+    border-radius: 4px; background: var(--tag-bg); color: var(--muted);
+  }
+  .source-tag.vector { background: var(--vector-bg); color: var(--vector-text); }
+
+  /* Checkbox styling */
+  .results-table input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+
+  .empty { text-align: center; padding: 3rem; color: var(--muted); font-size: 0.85rem; }
+
+  .progress-bar { height: 3px; background: var(--border); border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .3s; }
+  .progress-fill.pulse { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  .status-banner {
+    padding: 10px 14px; border-radius: 8px; font-size: 0.82rem; font-weight: 500;
+  }
+  .status-banner.running { background: #1e3a5f; color: var(--accent); }
+  .status-banner.error   { background: #450a0a; color: var(--danger); }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <h1>ATJ Category Updater</h1>
+  <span class="badge" id="env-badge">DEV</span>
+  <div class="theme-toggle" id="theme-toggle">
+    <span class="theme-toggle-option" data-theme="light">Light</span>
+    <span class="theme-toggle-option active" data-theme="dark">Dark</span>
+  </div>
+</header>
+
+<nav>
+  <a href="/">Batch Process</a>
+  <a href="/lookup" class="active">Manual Lookup</a>
+  <a href="/kpi">KPI Dashboard</a>
+</nav>
+
+<main>
+  <aside>
+    <section class="panel">
+      <h2>Material Categorize</h2>
+
+      <label>Enter ATJ Component Item Numbers</label>
+      <textarea id="item-input" placeholder="Enter item numbers separated by Enter or semicolon (;)&#10;&#10;Example:&#10;10TJ2104818-0&#10;14TJ5620269-7&#10;Y4TJ9918691-1"></textarea>
+      <div class="item-count"><strong id="item-count">0</strong> items detected</div>
+
+      <div class="helper-btns">
+        <button class="helper-btn" onclick="clearInput()">Clear</button>
+        <button class="helper-btn" onclick="removeDuplicates()">Remove Duplicates</button>
+        <button class="helper-btn" onclick="sortItems()">Sort</button>
+      </div>
+
+      <label style="margin-top:12px">Vector DB fallback top-K</label>
+      <select id="vector-top-k">
+        <option value="5">Top 5 categories</option>
+        <option value="10" selected>Top 10 categories</option>
+      </select>
+
+      <button class="run-btn" id="run-btn" onclick="runLookup()">Material Categorize</button>
+    </section>
+
+    <section class="panel">
+      <h2>Input Format</h2>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:0.78rem;color:var(--muted);">
+        <div>Separate item numbers by:</div>
+        <div style="padding-left:8px">
+          <div>- <strong style="color:var(--text)">Enter</strong> (one per line)</div>
+          <div>- <strong style="color:var(--text)">;</strong> (semicolon)</div>
+        </div>
+        <div style="margin-top:4px;">Blank lines and duplicates are ignored. Items not found in PBI will be marked as errors in the output.</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Legend</h2>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:0.78rem;">
+        <div><span style="color:var(--success)">&#x25CF;</span> High &#x2014; reliable AI suggestion</div>
+        <div><span style="color:var(--warn)">&#x25CF;</span> Medium &#x2014; review recommended</div>
+        <div><span style="color:var(--danger)">&#x25CF;</span> Low &#x2014; manual verification required</div>
+        <div><span style="color:var(--muted)">&#x25CF;</span> Error &#x2014; GPT call failed or item not found</div>
+        <div style="margin-top:4px;color:var(--muted);font-size:0.72rem;">
+          <span style="color:#a78bfa">&#x25B2;</span> Vector fallback &#x2014; used when fuzzy match fails
+        </div>
+      </div>
+    </section>
+  </aside>
+
+  <div class="content">
+    <h2>Results Preview</h2>
+
+    <!-- Status banner (shown during processing) -->
+    <div id="status-area" style="display:none"></div>
+
+    <!-- Toolbar: stats + export -->
+    <div id="results-toolbar" class="results-toolbar" style="display:none">
+      <div class="stat high">High: <span id="stat-high">0</span></div>
+      <div class="stat medium">Medium: <span id="stat-medium">0</span></div>
+      <div class="stat low">Low: <span id="stat-low">0</span></div>
+      <div class="stat">Total: <span id="stat-total">0</span></div>
+      <div class="select-info">Selected: <strong id="select-count">0</strong></div>
+      <button class="export-btn" id="export-btn" onclick="exportSelected()" disabled>Export Excel</button>
+    </div>
+
+    <!-- Filter bar -->
+    <div id="filter-bar" class="filter-bar" style="display:none">
+      <label>Filter:</label>
+      <select id="filter-category" onchange="applyFilters()">
+        <option value="">All Categories</option>
+      </select>
+      <select id="filter-confidence" onchange="applyFilters()">
+        <option value="">All Confidence</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="error">Error</option>
+      </select>
+      <div class="filter-count">Showing: <strong id="filter-showing">0</strong> / <strong id="filter-total">0</strong></div>
+    </div>
+
+    <!-- Results table -->
+    <div id="results-table-wrap" class="results-table-wrap" style="display:none">
+      <table class="results-table">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="select-all" checked onchange="toggleSelectAll()"></th>
+            <th data-col="Item_Number" onclick="sortTable('Item_Number')">Item Number <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="Item_Desc" onclick="sortTable('Item_Desc')">Item Desc <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="MFR_PART_NUMBER" onclick="sortTable('MFR_PART_NUMBER')">MFR Part Number <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="LifeCycle_Phase" onclick="sortTable('LifeCycle_Phase')">Lifecycle <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="AI_MATERIAL_CATEGORY" onclick="sortTable('AI_MATERIAL_CATEGORY')">AI Category <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="AI_confidence" onclick="sortTable('AI_confidence')">Confidence <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="AI_source" onclick="sortTable('AI_source')">Source <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="Ref_MPN" onclick="sortTable('Ref_MPN')">Ref MPN <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="Ref_Similarity" onclick="sortTable('Ref_Similarity')">Ref Similarity <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="Ref_MATERIAL_CATEGORY" onclick="sortTable('Ref_MATERIAL_CATEGORY')">Ref Category <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="Vector_top1_category" onclick="sortTable('Vector_top1_category')">Vector Top1 <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="AI_reason" onclick="sortTable('AI_reason')">AI Reason <span class="sort-arrow">&#x25B2;</span></th>
+          </tr>
+        </thead>
+        <tbody id="results-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="empty">
+      Paste item numbers and click "Material Categorize" to start.
+    </div>
+  </div>
+</main>
+
+<script>
+const API = '';
+let currentJobId = null;
+let currentResults = [];
+let filteredResults = [];
+let pollTimer = null;
+let sortState = { col: null, asc: true };
+
+// ===== Theme toggle =====
+
+function initTheme() {
+  const saved = localStorage.getItem('atj-theme') || 'dark';
+  setTheme(saved);
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('atj-theme', theme);
+  document.querySelectorAll('.theme-toggle-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.theme === theme);
+  });
+}
+
+document.getElementById('theme-toggle').addEventListener('click', function(e) {
+  const opt = e.target.closest('.theme-toggle-option');
+  if (opt) setTheme(opt.dataset.theme);
+});
+
+initTheme();
+
+// ===== Input helpers =====
+
+function parseItems() {
+  const raw = document.getElementById('item-input').value;
+  const items = raw.split(/[\n;]+/).map(s => s.trim()).filter(s => s.length > 0);
+  return [...new Set(items)];
+}
+
+function updateCount() {
+  document.getElementById('item-count').textContent = parseItems().length;
+}
+
+document.getElementById('item-input').addEventListener('input', updateCount);
+
+function clearInput() {
+  document.getElementById('item-input').value = '';
+  updateCount();
+}
+
+function removeDuplicates() {
+  const items = parseItems();
+  document.getElementById('item-input').value = items.join('\n');
+  updateCount();
+}
+
+function sortItems() {
+  const items = parseItems();
+  items.sort();
+  document.getElementById('item-input').value = items.join('\n');
+}
+
+async function loadConfig() {
+  const r = await fetch(`${API}/api/config`);
+  const c = await r.json();
+  const badge = document.getElementById('env-badge');
+  if (c.env === 'prod') { badge.textContent = 'PROD'; badge.classList.add('prod'); }
+}
+
+// ===== Main flow =====
+
+async function runLookup() {
+  const items = parseItems();
+  if (items.length === 0) {
+    alert('Please enter at least one item number.');
+    return;
+  }
+
+  const vectorTopK = parseInt(document.getElementById('vector-top-k').value);
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true; btn.textContent = 'Processing...';
+
+  // Reset UI
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('results-toolbar').style.display = 'none';
+  document.getElementById('filter-bar').style.display = 'none';
+  document.getElementById('results-table-wrap').style.display = 'none';
+  showStatus('running', `Processing ${items.length} items...`);
+
+  try {
+    const r = await fetch(`${API}/api/lookup/run`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ item_numbers: items, vector_top_k: vectorTopK })
+    });
+    const data = await r.json();
+    currentJobId = data.job_id;
+    startPolling(data.job_id);
+  } catch(e) {
+    showStatus('error', 'Error starting lookup: ' + e.message);
+    btn.disabled = false; btn.textContent = 'Material Categorize';
+  }
+}
+
+function startPolling(jobId) {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`${API}/api/batch/${jobId}/status`);
+      const job = await r.json();
+
+      if (job.status === 'running') {
+        showStatus('running', `Processing ${job.params?.item_count || '?'} items...`);
+      } else if (job.status === 'done') {
+        clearInterval(pollTimer); pollTimer = null;
+        document.getElementById('status-area').style.display = 'none';
+        currentResults = job.results || [];
+        sortState = { col: null, asc: true };
+        buildCategoryFilter();
+        applyFilters();
+        renderResults(job);
+        document.getElementById('run-btn').disabled = false;
+        document.getElementById('run-btn').textContent = 'Material Categorize';
+      } else if (job.status === 'error') {
+        clearInterval(pollTimer); pollTimer = null;
+        showStatus('error', job.error || 'Unknown error');
+        document.getElementById('run-btn').disabled = false;
+        document.getElementById('run-btn').textContent = 'Material Categorize';
+      }
+    } catch(e) {
+      // network error, keep polling
+    }
+  }, 2000);
+}
+
+function showStatus(type, msg) {
+  const el = document.getElementById('status-area');
+  el.style.display = 'block';
+  if (type === 'running') {
+    el.innerHTML = `<div class="status-banner running">${msg}
+      <div class="progress-bar" style="margin-top:8px"><div class="progress-fill pulse" style="width:60%"></div></div>
+    </div>`;
+  } else {
+    el.innerHTML = `<div class="status-banner error">${msg}</div>`;
+  }
+}
+
+// ===== Category filter options =====
+
+function buildCategoryFilter() {
+  const sel = document.getElementById('filter-category');
+  // Preserve current selection
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All Categories</option>';
+  const cats = [...new Set(currentResults.map(r => r.AI_MATERIAL_CATEGORY || '').filter(c => c))].sort();
+  cats.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c; opt.textContent = c;
+    sel.appendChild(opt);
+  });
+  sel.value = prev;
+}
+
+// ===== Filtering =====
+
+function applyFilters() {
+  const catFilter = document.getElementById('filter-category').value;
+  const confFilter = document.getElementById('filter-confidence').value;
+
+  filteredResults = currentResults.filter(row => {
+    if (catFilter && (row.AI_MATERIAL_CATEGORY || '') !== catFilter) return false;
+    if (confFilter && (row.AI_confidence || '').toLowerCase() !== confFilter) return false;
+    return true;
+  });
+
+  document.getElementById('filter-showing').textContent = filteredResults.length;
+  document.getElementById('filter-total').textContent = currentResults.length;
+
+  renderTable(filteredResults);
+}
+
+// ===== Sorting =====
+
+const CONF_ORDER = { high: 0, medium: 1, low: 2, error: 3 };
+
+function sortTable(col) {
+  if (sortState.col === col) {
+    sortState.asc = !sortState.asc;
+  } else {
+    sortState.col = col;
+    sortState.asc = true;
+  }
+
+  // Update header arrows
+  document.querySelectorAll('.results-table th').forEach(th => {
+    th.classList.remove('sorted');
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.innerHTML = '&#x25B2;';
+  });
+  const activeTh = document.querySelector(`th[data-col="${col}"]`);
+  if (activeTh) {
+    activeTh.classList.add('sorted');
+    const arrow = activeTh.querySelector('.sort-arrow');
+    if (arrow) arrow.innerHTML = sortState.asc ? '&#x25B2;' : '&#x25BC;';
+  }
+
+  filteredResults.sort((a, b) => {
+    let va = a[col] ?? '';
+    let vb = b[col] ?? '';
+
+    // Special sort for confidence: use rank order
+    if (col === 'AI_confidence') {
+      va = CONF_ORDER[String(va).toLowerCase()] ?? 99;
+      vb = CONF_ORDER[String(vb).toLowerCase()] ?? 99;
+    }
+    // Numeric sort for similarity
+    else if (col === 'Ref_Similarity') {
+      va = parseFloat(va) || 0;
+      vb = parseFloat(vb) || 0;
+    }
+    // String sort for everything else
+    else {
+      va = String(va).toLowerCase();
+      vb = String(vb).toLowerCase();
+    }
+
+    if (va < vb) return sortState.asc ? -1 : 1;
+    if (va > vb) return sortState.asc ? 1 : -1;
+    return 0;
+  });
+
+  renderTable(filteredResults);
+}
+
+// ===== Render results =====
+
+function renderResults(job) {
+  // Stats
+  document.getElementById('stat-high').textContent = job.high || 0;
+  document.getElementById('stat-medium').textContent = job.medium || 0;
+  document.getElementById('stat-low').textContent = job.low || 0;
+  document.getElementById('stat-total').textContent = job.total || 0;
+  document.getElementById('results-toolbar').style.display = 'flex';
+  document.getElementById('filter-bar').style.display = 'flex';
+  document.getElementById('results-table-wrap').style.display = 'block';
+  document.getElementById('select-all').checked = true;
+
+  renderTable(filteredResults);
+  updateSelectCount();
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('results-tbody');
+  tbody.innerHTML = '';
+
+  rows.forEach((row, idx) => {
+    const conf = (row.AI_confidence || '').toLowerCase();
+    const source = (row.AI_source || 'fuzzy_match');
+    const isVector = source === 'vector_fallback';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="row-select" data-item="${row.Item_Number}" checked onchange="updateSelectCount()"></td>
+      <td style="font-family:var(--mono);font-size:0.72rem;font-weight:600">${row.Item_Number || ''}</td>
+      <td class="wrap-cell" title="${esc(row.Item_Desc)}">${esc(truncate(row.Item_Desc, 60))}</td>
+      <td style="font-family:var(--mono);font-size:0.72rem">${esc(row.MFR_PART_NUMBER || '')}</td>
+      <td style="font-size:0.7rem">${esc(row.LifeCycle_Phase || '')}</td>
+      <td style="font-family:var(--mono);font-weight:600">${esc(row.AI_MATERIAL_CATEGORY || '')}</td>
+      <td><span class="conf-badge ${conf}">${conf.toUpperCase()}</span></td>
+      <td><span class="source-tag ${isVector ? 'vector' : ''}">${isVector ? 'VECTOR' : 'FUZZY'}</span></td>
+      <td style="font-family:var(--mono);font-size:0.7rem">${esc(row.Ref_MPN || '')}</td>
+      <td style="text-align:center">${row.Ref_Similarity || 0}</td>
+      <td style="font-size:0.7rem">${esc(row.Ref_MATERIAL_CATEGORY || '')}</td>
+      <td style="font-size:0.7rem">${esc(row.Vector_top1_category || '')}</td>
+      <td class="wrap-cell" style="min-width:400px;max-width:525px;font-size:0.7rem" title="${esc(row.AI_reason)}">${esc(truncate(row.AI_reason, 180))}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  updateSelectCount();
+}
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function truncate(s, n) {
+  if (!s) return '';
+  s = String(s);
+  return s.length > n ? s.slice(0, n) + '...' : s;
+}
+
+// ===== Select / deselect =====
+
+function toggleSelectAll() {
+  const checked = document.getElementById('select-all').checked;
+  document.querySelectorAll('.row-select').forEach(cb => cb.checked = checked);
+  updateSelectCount();
+}
+
+function updateSelectCount() {
+  const all = document.querySelectorAll('.row-select');
+  const selected = document.querySelectorAll('.row-select:checked');
+  document.getElementById('select-count').textContent = selected.length;
+  document.getElementById('export-btn').disabled = selected.length === 0;
+  // Update select-all state
+  const selectAll = document.getElementById('select-all');
+  if (selected.length === 0) { selectAll.checked = false; selectAll.indeterminate = false; }
+  else if (selected.length === all.length) { selectAll.checked = true; selectAll.indeterminate = false; }
+  else { selectAll.checked = false; selectAll.indeterminate = true; }
+}
+
+// ===== Export selected =====
+
+async function exportSelected() {
+  const selected = [...document.querySelectorAll('.row-select:checked')].map(cb => cb.dataset.item);
+  if (selected.length === 0) { alert('No items selected.'); return; }
+
+  const btn = document.getElementById('export-btn');
+  btn.disabled = true; btn.textContent = 'Exporting...';
+
+  try {
+    const r = await fetch(`${API}/api/batch/${currentJobId}/export-selected`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ job_id: currentJobId, selected_items: selected })
+    });
+    if (!r.ok) { throw new Error((await r.json()).detail || 'Export failed'); }
+
+    // Download the file
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ATJ_category_${currentJobId}_selected.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch(e) {
+    alert('Export error: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = 'Export Excel';
+}
+
+loadConfig();
+</script>
+</body>
+</html>

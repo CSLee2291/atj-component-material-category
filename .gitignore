@@ -1,0 +1,72 @@
+# ===========================
+# Python
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ===========================
+# Virtual environment
+# ===========================
+.venv/
+venv/
+ENV/
+
+# ===========================
+# Secrets & credentials
+# ===========================
+.env
+!.env.example
+
+# ===========================
+# IDE / Editor
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.claude/
+
+# ===========================
+# Data — caches (rebuild after install)
+# ===========================
+data/cache/*.parquet
+data/cache/*.npz
+data/cache/*.pkl
+data/cache/*.txt
+
+# ===========================
+# Data — runtime outputs
+# ===========================
+data/results/*.xlsx
+data/kpi/*.json
+data/batches/*
+!data/batches/.gitkeep
+
+# ===========================
+# Test artifacts
+# ===========================
+tests/_last_test_result.xlsx
+
+# ===========================
+# Phase I Excel (contains internal item data)
+# ===========================
+Phase_I_PUR_2024_2025.xlsx
+
+# ===========================
+# OpenAPI specs (large, optional reference)
+# ===========================
+openapi_*.yaml
+
+# ===========================
+# OS files
+# ===========================
+Thumbs.db
+.DS_Store
+desktop.ini

@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATJ Category Updater - KPI Dashboard</title>
+<style>
+  /* ===== Dark theme (default) ===== */
+  :root, [data-theme="dark"] {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+    --accent: #4f8ef7; --accent2: #22d3a8; --warn: #f59e0b;
+    --danger: #ef4444; --success: #22c55e;
+    --text: #e2e8f0; --muted: #64748b;
+    --th-bg: #1e2030;
+    --hover-row: rgba(79,142,247,0.05);
+    --toggle-bg: #1a1d27; --toggle-border: #2a2d3a;
+    --chart-grid: rgba(255,255,255,0.06);
+    --chart-text: #94a3b8;
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+
+  /* ===== Light theme ===== */
+  [data-theme="light"] {
+    --bg: #f5f7fa; --surface: #ffffff; --border: #d1d5db;
+    --accent: #2563eb; --accent2: #059669; --warn: #d97706;
+    --danger: #dc2626; --success: #16a34a;
+    --text: #1e293b; --muted: #6b7280;
+    --th-bg: #e5e7eb;
+    --hover-row: rgba(37,99,235,0.05);
+    --toggle-bg: #ffffff; --toggle-border: #d1d5db;
+    --chart-grid: rgba(0,0,0,0.06);
+    --chart-text: #6b7280;
+  }
+  [data-theme="light"] .badge { background: var(--accent); }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 2rem;
+    display: flex; align-items: center; gap: 1rem;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.01em; }
+  .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; background: var(--accent); color: #fff; font-weight: 600; }
+
+  /* Theme toggle */
+  .theme-toggle {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--toggle-bg); border: 1px solid var(--toggle-border);
+    border-radius: 99px; padding: 3px 4px; cursor: pointer;
+    user-select: none;
+  }
+  .theme-toggle-option {
+    font-size: 0.72rem; font-weight: 600; padding: 4px 12px;
+    border-radius: 99px; transition: all .2s;
+    color: var(--muted);
+  }
+  .theme-toggle-option.active {
+    background: var(--accent); color: #fff;
+  }
+
+  nav {
+    display: flex; gap: 0; border-bottom: 1px solid var(--border);
+  }
+  nav a {
+    padding: 0.7rem 1.5rem; font-size: 0.85rem; font-weight: 500;
+    color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+  nav a:hover { color: var(--text); }
+  nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem; display: flex; flex-direction: column; gap: 1.5rem; }
+
+  /* Section titles */
+  .section-title {
+    font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted);
+  }
+
+  /* ===== KPI Cards ===== */
+  .kpi-header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .kpi-cards {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; flex: 1;
+  }
+  .kpi-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.25rem; display: flex; flex-direction: column; gap: 4px;
+  }
+  .kpi-card .kpi-value {
+    font-size: 1.8rem; font-weight: 700; font-family: var(--mono);
+    line-height: 1.1;
+  }
+  .kpi-card .kpi-label {
+    font-size: 0.75rem; color: var(--muted); font-weight: 500;
+  }
+  .kpi-card.total   .kpi-value { color: var(--text); }
+  .kpi-card.filled  .kpi-value { color: var(--success); }
+  .kpi-card.blank   .kpi-value { color: var(--danger); }
+  .kpi-card.pct     .kpi-value { color: var(--accent); }
+
+  .snapshot-actions {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  }
+  .snapshot-btn {
+    padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer;
+    background: var(--accent2); color: #fff; font-weight: 700; font-size: 0.85rem;
+    transition: opacity .15s; white-space: nowrap;
+  }
+  .snapshot-btn:hover { opacity: 0.85; }
+  .snapshot-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .snapshot-meta { font-size: 0.72rem; color: var(--muted); text-align: right; }
+
+  /* ===== Charts ===== */
+  .charts-row {
+    display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px;
+  }
+  .chart-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem; display: flex; flex-direction: column; gap: 10px;
+  }
+  .chart-panel h3 {
+    font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--muted);
+  }
+  .chart-container { position: relative; width: 100%; min-height: 280px; }
+  .chart-container canvas { width: 100% !important; }
+  .chart-empty {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 280px; color: var(--muted); font-size: 0.85rem;
+  }
+
+  /* ===== Detail Table ===== */
+  .detail-section {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem; display: flex; flex-direction: column; gap: 10px;
+  }
+  .detail-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .filter-group {
+    display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+  }
+  .filter-btn {
+    padding: 5px 14px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+    border: none; background: var(--bg); color: var(--muted);
+    transition: all .15s;
+  }
+  .filter-btn:hover { color: var(--text); }
+  .filter-btn.active { background: var(--accent); color: #fff; }
+  .filter-btn + .filter-btn { border-left: 1px solid var(--border); }
+
+  .detail-toolbar select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 5px 8px; font-size: 0.78rem; font-family: var(--sans);
+  }
+  .detail-toolbar select:focus { outline: none; border-color: var(--accent); }
+
+  .detail-toolbar .detail-count {
+    font-size: 0.75rem; color: var(--muted); margin-left: auto;
+  }
+  .detail-toolbar .detail-count strong { color: var(--text); }
+
+  .detail-table-wrap {
+    overflow-x: auto; max-height: 500px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .detail-table {
+    width: 100%; border-collapse: collapse; font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .detail-table th {
+    background: var(--th-bg); color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 8px 10px; text-align: left;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 1;
+    font-size: 0.68rem; cursor: pointer; user-select: none;
+  }
+  .detail-table th:hover { color: var(--text); }
+  .detail-table th .sort-arrow {
+    display: inline-block; margin-left: 3px; font-size: 0.6rem;
+    opacity: 0.3; transition: opacity .15s;
+  }
+  .detail-table th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+  .detail-table td {
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+    max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+    vertical-align: top;
+  }
+  .detail-table tr:hover td { background: var(--hover-row); }
+  .detail-table .wrap-cell { white-space: normal; word-break: break-word; }
+
+  .cat-badge {
+    display: inline-block; font-size: 0.68rem; font-weight: 700;
+    padding: 1px 7px; border-radius: 99px;
+  }
+  .cat-badge.filled { background: #14532d; color: var(--success); }
+  .cat-badge.blank  { background: #450a0a; color: var(--danger); }
+  [data-theme="light"] .cat-badge.filled { background: #dcfce7; color: #15803d; }
+  [data-theme="light"] .cat-badge.blank  { background: #fee2e2; color: #dc2626; }
+
+  .loading-spinner {
+    display: flex; align-items: center; justify-content: center;
+    padding: 2rem; color: var(--muted); font-size: 0.85rem; gap: 8px;
+  }
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Pagination */
+  .pagination {
+    display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px;
+  }
+  .page-btn {
+    padding: 5px 12px; font-size: 0.75rem; font-weight: 600;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--muted); cursor: pointer;
+    transition: all .15s;
+  }
+  .page-btn:hover { border-color: var(--accent); color: var(--text); }
+  .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .page-info { font-size: 0.73rem; color: var(--muted); }
+
+  @media (max-width: 900px) {
+    .kpi-cards { grid-template-columns: repeat(2, 1fr); }
+    .charts-row { grid-template-columns: 1fr; }
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+
+<header>
+  <h1>ATJ Category Updater</h1>
+  <span class="badge" id="env-badge">DEV</span>
+  <span style="flex:1"></span>
+  <div class="theme-toggle" id="theme-toggle">
+    <span class="theme-toggle-option" data-theme="light">Light</span>
+    <span class="theme-toggle-option active" data-theme="dark">Dark</span>
+  </div>
+</header>
+
+<nav>
+  <a href="/">Batch Process</a>
+  <a href="/lookup">Manual Lookup</a>
+  <a href="/kpi" class="active">KPI Dashboard</a>
+</nav>
+
+<main>
+  <!-- KPI Cards -->
+  <div class="kpi-header">
+    <div class="kpi-cards">
+      <div class="kpi-card total">
+        <div class="kpi-value" id="kpi-total">--</div>
+        <div class="kpi-label">Total ATJ Components</div>
+      </div>
+      <div class="kpi-card filled">
+        <div class="kpi-value" id="kpi-filled">--</div>
+        <div class="kpi-label">Filled (has Material Category)</div>
+      </div>
+      <div class="kpi-card blank">
+        <div class="kpi-value" id="kpi-blank">--</div>
+        <div class="kpi-label">Blank (needs categorization)</div>
+      </div>
+      <div class="kpi-card pct">
+        <div class="kpi-value" id="kpi-pct">--</div>
+        <div class="kpi-label">Completion Rate</div>
+      </div>
+    </div>
+    <div class="snapshot-actions">
+      <button class="snapshot-btn" id="snapshot-btn" onclick="takeSnapshot()">Take Snapshot</button>
+      <div class="snapshot-meta" id="snapshot-meta">No snapshots yet</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-row">
+    <div class="chart-panel">
+      <h3>Weekly Completion Trend</h3>
+      <div class="chart-container" id="trend-chart-container">
+        <canvas id="trend-chart"></canvas>
+      </div>
+    </div>
+    <div class="chart-panel">
+      <h3>By Lifecycle Phase (Latest Snapshot)</h3>
+      <div class="chart-container" id="lifecycle-chart-container">
+        <canvas id="lifecycle-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail Table -->
+  <div class="detail-section">
+    <div class="detail-toolbar">
+      <span class="section-title" style="margin-right:8px">Item Details</span>
+      <div class="filter-group">
+        <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
+        <button class="filter-btn" data-filter="filled" onclick="setFilter('filled')">Filled</button>
+        <button class="filter-btn" data-filter="blank" onclick="setFilter('blank')">Blank</button>
+      </div>
+      <select id="lifecycle-filter" onchange="loadDetails()">
+        <option value="">All Lifecycles</option>
+      </select>
+      <button class="page-btn" id="refresh-details-btn" onclick="loadDetails()" style="margin-left:4px">Refresh</button>
+      <div class="detail-count">Showing: <strong id="detail-showing">0</strong> items</div>
+    </div>
+
+    <div id="detail-loading" class="loading-spinner" style="display:none">
+      <div class="spinner"></div> Loading item details from Denodo...
+    </div>
+
+    <div id="detail-table-wrap" class="detail-table-wrap" style="display:none">
+      <table class="detail-table">
+        <thead>
+          <tr>
+            <th data-col="Item_Number" onclick="sortDetail('Item_Number')">Item Number <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="Item_Desc" onclick="sortDetail('Item_Desc')">Item Desc <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="MATERIAL_CATEGORY" onclick="sortDetail('MATERIAL_CATEGORY')">Material Category <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="LifeCycle_Phase" onclick="sortDetail('LifeCycle_Phase')">Lifecycle <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="MANUFACTURE_NAME" onclick="sortDetail('MANUFACTURE_NAME')">Manufacturer <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-col="MFR_PART_NUMBER" onclick="sortDetail('MFR_PART_NUMBER')">MFR Part Number <span class="sort-arrow">&#x25B2;</span></th>
+          </tr>
+        </thead>
+        <tbody id="detail-tbody"></tbody>
+      </table>
+    </div>
+
+    <div id="detail-empty" style="text-align:center;padding:2rem;color:var(--muted);font-size:0.85rem;">
+      Click "Refresh" or take a snapshot to load detail data.
+    </div>
+
+    <!-- Pagination -->
+    <div class="pagination" id="pagination" style="display:none">
+      <button class="page-btn" id="prev-btn" onclick="changePage(-1)" disabled>&laquo; Prev</button>
+      <span class="page-info" id="page-info">Page 1</span>
+      <button class="page-btn" id="next-btn" onclick="changePage(1)">Next &raquo;</button>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- PHASE I KPI SECTION                                               -->
+  <!-- ================================================================= -->
+  <div style="border-top:2px solid var(--accent);margin-top:0.5rem;padding-top:1.5rem;">
+    <div class="section-title" style="font-size:0.9rem;margin-bottom:1rem;color:var(--accent);">
+      Phase I Progress (7,968 items from PUR 2024-2025)
+    </div>
+  </div>
+
+  <!-- Phase I KPI Cards -->
+  <div class="kpi-header">
+    <div class="kpi-cards">
+      <div class="kpi-card total">
+        <div class="kpi-value" id="p1-total">--</div>
+        <div class="kpi-label">Phase I Items</div>
+      </div>
+      <div class="kpi-card filled">
+        <div class="kpi-value" id="p1-filled">--</div>
+        <div class="kpi-label">Filled (in Denodo)</div>
+      </div>
+      <div class="kpi-card blank">
+        <div class="kpi-value" id="p1-blank">--</div>
+        <div class="kpi-label">Blank (needs categorization)</div>
+      </div>
+      <div class="kpi-card pct">
+        <div class="kpi-value" id="p1-pct">--</div>
+        <div class="kpi-label">Completion Rate</div>
+      </div>
+    </div>
+    <div class="snapshot-actions">
+      <button class="snapshot-btn" id="p1-snapshot-btn" onclick="takeP1Snapshot()">Take Phase I Snapshot</button>
+      <div class="snapshot-meta" id="p1-snapshot-meta">No Phase I snapshots yet</div>
+    </div>
+  </div>
+
+  <!-- Phase I Charts -->
+  <div class="charts-row">
+    <div class="chart-panel">
+      <h3>Phase I Weekly Trend</h3>
+      <div class="chart-container" id="p1-trend-container">
+        <canvas id="p1-trend-chart"></canvas>
+      </div>
+    </div>
+    <div class="chart-panel">
+      <h3>Phase I Lifecycle Breakdown</h3>
+      <div class="chart-container" id="p1-lifecycle-container">
+        <canvas id="p1-lifecycle-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase I Batch Process -->
+  <div class="detail-section">
+    <div class="detail-toolbar">
+      <span class="section-title" style="margin-right:8px">Phase I AI Batch</span>
+      <label style="display:inline;font-size:0.75rem;color:var(--muted);margin:0;">Offset:</label>
+      <input type="number" id="p1-offset" value="0" min="0" step="100"
+             style="width:80px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:0.78rem;font-family:var(--mono);">
+      <label style="display:inline;font-size:0.75rem;color:var(--muted);margin:0;">Batch size:</label>
+      <input type="number" id="p1-limit" value="100" min="1" max="500"
+             style="width:70px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:0.78rem;font-family:var(--mono);">
+      <button class="snapshot-btn" id="p1-batch-btn" onclick="runP1Batch()" style="padding:6px 16px;font-size:0.78rem;">
+        Run AI Batch
+      </button>
+      <div class="detail-count" id="p1-batch-status"></div>
+    </div>
+    <div id="p1-batch-progress" style="display:none;padding:10px 14px;border-radius:8px;font-size:0.82rem;font-weight:500;background:#1e3a5f;color:var(--accent);">
+      Processing...
+      <div class="progress-bar" style="margin-top:8px;height:3px;background:var(--border);border-radius:99px;overflow:hidden;">
+        <div class="progress-fill pulse" style="width:60%;height:100%;background:var(--accent);border-radius:99px;animation:pulse 1.5s ease-in-out infinite;"></div>
+      </div>
+    </div>
+    <div id="p1-batch-result" style="display:none;padding:10px 14px;border-radius:8px;font-size:0.82rem;"></div>
+  </div>
+
+  <!-- Phase I Detail Table -->
+  <div class="detail-section">
+    <div class="detail-toolbar">
+      <span class="section-title" style="margin-right:8px">Phase I Details</span>
+      <div class="filter-group">
+        <button class="filter-btn active" data-p1filter="all" onclick="setP1Filter('all')">All</button>
+        <button class="filter-btn" data-p1filter="filled" onclick="setP1Filter('filled')">Filled</button>
+        <button class="filter-btn" data-p1filter="blank" onclick="setP1Filter('blank')">Blank</button>
+      </div>
+      <select id="p1-lifecycle-filter" onchange="loadP1Details()">
+        <option value="">All Lifecycles</option>
+      </select>
+      <button class="page-btn" onclick="loadP1Details()" style="margin-left:4px">Refresh</button>
+      <div class="detail-count">Showing: <strong id="p1-detail-showing">0</strong> items</div>
+    </div>
+
+    <div id="p1-detail-loading" class="loading-spinner" style="display:none">
+      <div class="spinner"></div> Loading Phase I details from Denodo...
+    </div>
+
+    <div id="p1-detail-table-wrap" class="detail-table-wrap" style="display:none">
+      <table class="detail-table" id="p1-detail-table">
+        <thead>
+          <tr>
+            <th data-p1col="Item_Number" onclick="sortP1Detail('Item_Number')">Item Number <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-p1col="Item_Desc" onclick="sortP1Detail('Item_Desc')">Item Desc <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-p1col="MATERIAL_CATEGORY" onclick="sortP1Detail('MATERIAL_CATEGORY')">Material Category <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-p1col="LifeCycle_Phase" onclick="sortP1Detail('LifeCycle_Phase')">Lifecycle <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-p1col="MANUFACTURE_NAME" onclick="sortP1Detail('MANUFACTURE_NAME')">Manufacturer <span class="sort-arrow">&#x25B2;</span></th>
+            <th data-p1col="MFR_PART_NUMBER" onclick="sortP1Detail('MFR_PART_NUMBER')">MFR Part Number <span class="sort-arrow">&#x25B2;</span></th>
+          </tr>
+        </thead>
+        <tbody id="p1-detail-tbody"></tbody>
+      </table>
+    </div>
+
+    <div id="p1-detail-empty" style="text-align:center;padding:2rem;color:var(--muted);font-size:0.85rem;">
+      Click "Refresh" or take a Phase I snapshot to load details.
+    </div>
+
+    <div class="pagination" id="p1-pagination" style="display:none">
+      <button class="page-btn" id="p1-prev-btn" onclick="changeP1Page(-1)" disabled>&laquo; Prev</button>
+      <span class="page-info" id="p1-page-info">Page 1</span>
+      <button class="page-btn" id="p1-next-btn" onclick="changeP1Page(1)">Next &raquo;</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = '';
+const PAGE_SIZE = 100;
+let allDetails = [];
+let detailSort = { col: null, asc: true };
+let currentPage = 1;
+let currentFilter = 'all';
+let trendChartInst = null;
+let lifecycleChartInst = null;
+
+// ===== Theme =====
+function initTheme() {
+  const saved = localStorage.getItem('atj-theme') || 'dark';
+  setTheme(saved);
+}
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('atj-theme', theme);
+  document.querySelectorAll('.theme-toggle-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.theme === theme);
+  });
+  // Redraw charts with new theme colors
+  if (trendChartInst || lifecycleChartInst) {
+    const snaps = trendChartInst?._snapshotsData;
+    if (snaps) renderTrendChart(snaps);
+    const lc = lifecycleChartInst?._lifecycleData;
+    if (lc) renderLifecycleChart(lc);
+  }
+}
+document.getElementById('theme-toggle').addEventListener('click', function(e) {
+  const opt = e.target.closest('.theme-toggle-option');
+  if (opt) setTheme(opt.dataset.theme);
+});
+initTheme();
+
+// ===== Helpers =====
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function truncate(s, n) {
+  if (!s) return '';
+  s = String(s);
+  return s.length > n ? s.slice(0, n) + '...' : s;
+}
+function getCSS(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+// ===== Load config =====
+async function loadConfig() {
+  try {
+    const r = await fetch(`${API}/api/config`);
+    const c = await r.json();
+    const badge = document.getElementById('env-badge');
+    if (c.env === 'prod') { badge.textContent = 'PROD'; badge.classList.add('prod'); }
+  } catch(e) {}
+}
+
+// ===== KPI Cards =====
+async function loadLatest() {
+  try {
+    const r = await fetch(`${API}/api/kpi/latest`);
+    const data = await r.json();
+    const snap = data.snapshot;
+    if (!snap) {
+      document.getElementById('snapshot-meta').textContent = 'No snapshots yet. Click "Take Snapshot" to start.';
+      return;
+    }
+    document.getElementById('kpi-total').textContent = snap.total.toLocaleString();
+    document.getElementById('kpi-filled').textContent = snap.filled.toLocaleString();
+    document.getElementById('kpi-blank').textContent = snap.blank.toLocaleString();
+    document.getElementById('kpi-pct').textContent = snap.completion_pct + '%';
+    const ts = new Date(snap.timestamp).toLocaleString();
+    document.getElementById('snapshot-meta').textContent = `Week ${snap.week} \u00B7 ${ts}`;
+
+    // Populate lifecycle filter
+    if (snap.by_lifecycle) {
+      const sel = document.getElementById('lifecycle-filter');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All Lifecycles</option>';
+      Object.keys(snap.by_lifecycle).sort().forEach(phase => {
+        const opt = document.createElement('option');
+        opt.value = phase; opt.textContent = phase;
+        sel.appendChild(opt);
+      });
+      sel.value = prev;
+    }
+  } catch(e) {
+    console.error('loadLatest error:', e);
+  }
+}
+
+// ===== Snapshot =====
+async function takeSnapshot() {
+  const btn = document.getElementById('snapshot-btn');
+  btn.disabled = true; btn.textContent = 'Taking snapshot...';
+  try {
+    const r = await fetch(`${API}/api/kpi/snapshot`, { method: 'POST' });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      btn.textContent = 'Done!';
+      // Refresh everything
+      await Promise.all([loadLatest(), loadSnapshots()]);
+      loadDetails();
+    } else {
+      btn.textContent = 'Error: ' + (data.detail || 'unknown');
+    }
+  } catch(e) {
+    btn.textContent = 'Error: ' + e.message;
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Take Snapshot'; }, 2000);
+}
+
+// ===== Trend Chart =====
+async function loadSnapshots() {
+  try {
+    const r = await fetch(`${API}/api/kpi/snapshots`);
+    const snapshots = await r.json();
+    renderTrendChart(snapshots);
+    // Render lifecycle from latest
+    if (snapshots.length > 0) {
+      renderLifecycleChart(snapshots[snapshots.length - 1].by_lifecycle);
+    }
+  } catch(e) {
+    console.error('loadSnapshots error:', e);
+  }
+}
+
+function renderTrendChart(snapshots) {
+  const container = document.getElementById('trend-chart-container');
+  if (!snapshots || snapshots.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No snapshot history yet. Take your first snapshot to see the trend.</div>';
+    trendChartInst = null;
+    return;
+  }
+  // Ensure canvas exists
+  if (!container.querySelector('canvas')) {
+    container.innerHTML = '<canvas id="trend-chart"></canvas>';
+  }
+  const ctx = document.getElementById('trend-chart').getContext('2d');
+
+  if (trendChartInst) trendChartInst.destroy();
+
+  const labels = snapshots.map(s => s.week);
+  const gridColor = getCSS('--chart-grid') || 'rgba(255,255,255,0.06)';
+  const textColor = getCSS('--chart-text') || '#94a3b8';
+
+  trendChartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Total',
+          data: snapshots.map(s => s.total),
+          borderColor: getCSS('--muted'),
+          backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, tension: 0.3,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Filled',
+          data: snapshots.map(s => s.filled),
+          borderColor: getCSS('--success'),
+          backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, tension: 0.3,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Blank',
+          data: snapshots.map(s => s.blank),
+          borderColor: getCSS('--danger'),
+          backgroundColor: 'transparent',
+          borderWidth: 2, pointRadius: 3, tension: 0.3,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Completion %',
+          data: snapshots.map(s => s.completion_pct),
+          borderColor: getCSS('--accent'),
+          backgroundColor: 'transparent',
+          borderWidth: 2.5, borderDash: [6, 3],
+          pointRadius: 4, tension: 0.3,
+          yAxisID: 'y1',
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: textColor, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + ctx.parsed.y + '%';
+              return ctx.dataset.label + ': ' + ctx.parsed.y.toLocaleString();
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor } },
+        y: {
+          position: 'left',
+          ticks: { color: textColor, font: { size: 10 } },
+          grid: { color: gridColor },
+          title: { display: true, text: 'Count', color: textColor, font: { size: 11 } },
+        },
+        y1: {
+          position: 'right',
+          min: 0, max: 100,
+          ticks: { color: getCSS('--accent'), font: { size: 10 }, callback: v => v + '%' },
+          grid: { drawOnChartArea: false },
+          title: { display: true, text: 'Completion %', color: getCSS('--accent'), font: { size: 11 } },
+        },
+      }
+    }
+  });
+  trendChartInst._snapshotsData = snapshots;
+}
+
+function renderLifecycleChart(byLifecycle) {
+  const container = document.getElementById('lifecycle-chart-container');
+  if (!byLifecycle || Object.keys(byLifecycle).length === 0) {
+    container.innerHTML = '<div class="chart-empty">No lifecycle data available.</div>';
+    lifecycleChartInst = null;
+    return;
+  }
+  if (!container.querySelector('canvas')) {
+    container.innerHTML = '<canvas id="lifecycle-chart"></canvas>';
+  }
+  const ctx = document.getElementById('lifecycle-chart').getContext('2d');
+
+  if (lifecycleChartInst) lifecycleChartInst.destroy();
+
+  const phases = Object.keys(byLifecycle).sort((a, b) => byLifecycle[b].total - byLifecycle[a].total);
+  const gridColor = getCSS('--chart-grid') || 'rgba(255,255,255,0.06)';
+  const textColor = getCSS('--chart-text') || '#94a3b8';
+
+  lifecycleChartInst = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: phases,
+      datasets: [
+        {
+          label: 'Filled',
+          data: phases.map(p => byLifecycle[p].filled),
+          backgroundColor: getCSS('--success'),
+          borderRadius: 3,
+        },
+        {
+          label: 'Blank',
+          data: phases.map(p => byLifecycle[p].blank),
+          backgroundColor: getCSS('--danger'),
+          borderRadius: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: {
+        legend: { labels: { color: textColor, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            afterBody: function(items) {
+              const phase = items[0].label;
+              const pct = byLifecycle[phase]?.pct;
+              return pct != null ? `Completion: ${pct}%` : '';
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { color: textColor, font: { size: 10 } },
+          grid: { color: gridColor },
+          title: { display: true, text: 'Count', color: textColor, font: { size: 11 } },
+        },
+        y: {
+          stacked: true,
+          ticks: { color: textColor, font: { size: 10 } },
+          grid: { color: gridColor },
+        },
+      }
+    }
+  });
+  lifecycleChartInst._lifecycleData = byLifecycle;
+}
+
+// ===== Detail Table =====
+function setFilter(mode) {
+  currentFilter = mode;
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === mode);
+  });
+  currentPage = 1;
+  loadDetails();
+}
+
+async function loadDetails() {
+  const lifecycle = document.getElementById('lifecycle-filter').value;
+  const loading = document.getElementById('detail-loading');
+  const tableWrap = document.getElementById('detail-table-wrap');
+  const empty = document.getElementById('detail-empty');
+  const pagination = document.getElementById('pagination');
+
+  loading.style.display = 'flex';
+  tableWrap.style.display = 'none';
+  empty.style.display = 'none';
+  pagination.style.display = 'none';
+
+  try {
+    let url = `${API}/api/kpi/details?filter=${currentFilter}`;
+    if (lifecycle) url += `&lifecycle=${encodeURIComponent(lifecycle)}`;
+    const r = await fetch(url);
+    const data = await r.json();
+    allDetails = data.items || [];
+    detailSort = { col: null, asc: true };
+    currentPage = 1;
+
+    loading.style.display = 'none';
+    if (allDetails.length === 0) {
+      empty.style.display = 'block';
+      empty.textContent = 'No items found for the current filter.';
+    } else {
+      renderDetailPage();
+    }
+    document.getElementById('detail-showing').textContent = allDetails.length.toLocaleString();
+  } catch(e) {
+    loading.style.display = 'none';
+    empty.style.display = 'block';
+    empty.textContent = 'Error loading details: ' + e.message;
+  }
+}
+
+function sortDetail(col) {
+  if (detailSort.col === col) {
+    detailSort.asc = !detailSort.asc;
+  } else {
+    detailSort.col = col;
+    detailSort.asc = true;
+  }
+  // Update arrows
+  document.querySelectorAll('.detail-table th').forEach(th => {
+    th.classList.remove('sorted');
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.innerHTML = '&#x25B2;';
+  });
+  const activeTh = document.querySelector(`.detail-table th[data-col="${col}"]`);
+  if (activeTh) {
+    activeTh.classList.add('sorted');
+    const arrow = activeTh.querySelector('.sort-arrow');
+    if (arrow) arrow.innerHTML = detailSort.asc ? '&#x25B2;' : '&#x25BC;';
+  }
+
+  allDetails.sort((a, b) => {
+    let va = String(a[col] || '').toLowerCase();
+    let vb = String(b[col] || '').toLowerCase();
+    if (va < vb) return detailSort.asc ? -1 : 1;
+    if (va > vb) return detailSort.asc ? 1 : -1;
+    return 0;
+  });
+
+  currentPage = 1;
+  renderDetailPage();
+}
+
+function renderDetailPage() {
+  const totalPages = Math.ceil(allDetails.length / PAGE_SIZE);
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageRows = allDetails.slice(start, start + PAGE_SIZE);
+
+  const tbody = document.getElementById('detail-tbody');
+  tbody.innerHTML = '';
+
+  pageRows.forEach(row => {
+    const hasCat = (row.MATERIAL_CATEGORY || '').trim() !== '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family:var(--mono);font-size:0.72rem;font-weight:600">${esc(row.Item_Number)}</td>
+      <td class="wrap-cell" style="max-width:320px" title="${esc(row.Item_Desc)}">${esc(truncate(row.Item_Desc, 80))}</td>
+      <td>${hasCat
+        ? '<span class="cat-badge filled">' + esc(row.MATERIAL_CATEGORY) + '</span>'
+        : '<span class="cat-badge blank">BLANK</span>'
+      }</td>
+      <td style="font-size:0.72rem">${esc(row.LifeCycle_Phase)}</td>
+      <td style="font-size:0.72rem">${esc(row.MANUFACTURE_NAME)}</td>
+      <td style="font-family:var(--mono);font-size:0.72rem">${esc(row.MFR_PART_NUMBER)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('detail-table-wrap').style.display = 'block';
+  document.getElementById('detail-empty').style.display = 'none';
+
+  // Pagination
+  const pagination = document.getElementById('pagination');
+  if (totalPages > 1) {
+    pagination.style.display = 'flex';
+    document.getElementById('prev-btn').disabled = currentPage <= 1;
+    document.getElementById('next-btn').disabled = currentPage >= totalPages;
+    document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+  } else {
+    pagination.style.display = 'none';
+  }
+}
+
+function changePage(delta) {
+  const totalPages = Math.ceil(allDetails.length / PAGE_SIZE);
+  currentPage = Math.max(1, Math.min(totalPages, currentPage + delta));
+  renderDetailPage();
+  // Scroll table to top
+  document.getElementById('detail-table-wrap').scrollTop = 0;
+}
+
+// ===========================================================================
+// PHASE I KPI
+// ===========================================================================
+
+let p1Details = [];
+let p1Sort = { col: null, asc: true };
+let p1Page = 1;
+let p1Filter = 'all';
+let p1TrendChart = null;
+let p1LifecycleChart = null;
+let p1PollTimer = null;
+
+// ===== Phase I KPI Cards =====
+async function loadP1Latest() {
+  try {
+    const r = await fetch(`${API}/api/kpi/phase1/latest`);
+    const data = await r.json();
+    const snap = data.snapshot;
+    if (!snap) {
+      document.getElementById('p1-snapshot-meta').textContent = 'No Phase I snapshots yet.';
+      return;
+    }
+    document.getElementById('p1-total').textContent = snap.total.toLocaleString();
+    document.getElementById('p1-filled').textContent = snap.filled.toLocaleString();
+    document.getElementById('p1-blank').textContent = snap.blank.toLocaleString();
+    document.getElementById('p1-pct').textContent = snap.completion_pct + '%';
+    const ts = new Date(snap.timestamp).toLocaleString();
+    document.getElementById('p1-snapshot-meta').textContent = `Week ${snap.week} \u00B7 ${ts}`;
+
+    if (snap.by_lifecycle) {
+      const sel = document.getElementById('p1-lifecycle-filter');
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">All Lifecycles</option>';
+      Object.keys(snap.by_lifecycle).sort().forEach(phase => {
+        const opt = document.createElement('option');
+        opt.value = phase; opt.textContent = phase;
+        sel.appendChild(opt);
+      });
+      sel.value = prev;
+    }
+  } catch(e) { console.error('loadP1Latest error:', e); }
+}
+
+// ===== Phase I Snapshot =====
+async function takeP1Snapshot() {
+  const btn = document.getElementById('p1-snapshot-btn');
+  btn.disabled = true; btn.textContent = 'Taking snapshot...';
+  try {
+    const r = await fetch(`${API}/api/kpi/phase1/snapshot`, { method: 'POST' });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      btn.textContent = 'Done!';
+      await Promise.all([loadP1Latest(), loadP1Snapshots()]);
+    } else {
+      btn.textContent = 'Error: ' + (data.detail || 'unknown');
+    }
+  } catch(e) {
+    btn.textContent = 'Error: ' + e.message;
+  }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Take Phase I Snapshot'; }, 2000);
+}
+
+// ===== Phase I Trend Chart =====
+async function loadP1Snapshots() {
+  try {
+    const r = await fetch(`${API}/api/kpi/phase1/snapshots`);
+    const snapshots = await r.json();
+    renderP1TrendChart(snapshots);
+    if (snapshots.length > 0) {
+      renderP1LifecycleChart(snapshots[snapshots.length - 1].by_lifecycle);
+    }
+  } catch(e) { console.error('loadP1Snapshots error:', e); }
+}
+
+function renderP1TrendChart(snapshots) {
+  const container = document.getElementById('p1-trend-container');
+  if (!snapshots || snapshots.length === 0) {
+    container.innerHTML = '<div class="chart-empty">No Phase I snapshot history yet.</div>';
+    p1TrendChart = null; return;
+  }
+  if (!container.querySelector('canvas')) {
+    container.innerHTML = '<canvas id="p1-trend-chart"></canvas>';
+  }
+  const ctx = document.getElementById('p1-trend-chart').getContext('2d');
+  if (p1TrendChart) p1TrendChart.destroy();
+
+  const labels = snapshots.map(s => s.week);
+  const gridColor = getCSS('--chart-grid'); const textColor = getCSS('--chart-text');
+
+  p1TrendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Total', data: snapshots.map(s => s.total), borderColor: getCSS('--muted'), backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y' },
+        { label: 'Filled', data: snapshots.map(s => s.filled), borderColor: getCSS('--success'), backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y' },
+        { label: 'Blank', data: snapshots.map(s => s.blank), borderColor: getCSS('--danger'), backgroundColor: 'transparent', borderWidth: 2, pointRadius: 3, tension: 0.3, yAxisID: 'y' },
+        { label: 'Completion %', data: snapshots.map(s => s.completion_pct), borderColor: getCSS('--accent'), backgroundColor: 'transparent', borderWidth: 2.5, borderDash: [6,3], pointRadius: 4, tension: 0.3, yAxisID: 'y1' },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: textColor, font: { size: 11 } } },
+        tooltip: { callbacks: { label: function(c) { return c.dataset.yAxisID === 'y1' ? c.dataset.label+': '+c.parsed.y+'%' : c.dataset.label+': '+c.parsed.y.toLocaleString(); } } }
+      },
+      scales: {
+        x: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor } },
+        y: { position: 'left', ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor }, title: { display: true, text: 'Count', color: textColor, font: { size: 11 } } },
+        y1: { position: 'right', min: 0, max: 100, ticks: { color: getCSS('--accent'), font: { size: 10 }, callback: v => v+'%' }, grid: { drawOnChartArea: false }, title: { display: true, text: '%', color: getCSS('--accent'), font: { size: 11 } } },
+      }
+    }
+  });
+  p1TrendChart._snapshotsData = snapshots;
+}
+
+function renderP1LifecycleChart(byLifecycle) {
+  const container = document.getElementById('p1-lifecycle-container');
+  if (!byLifecycle || Object.keys(byLifecycle).length === 0) {
+    container.innerHTML = '<div class="chart-empty">No Phase I lifecycle data.</div>';
+    p1LifecycleChart = null; return;
+  }
+  if (!container.querySelector('canvas')) {
+    container.innerHTML = '<canvas id="p1-lifecycle-chart"></canvas>';
+  }
+  const ctx = document.getElementById('p1-lifecycle-chart').getContext('2d');
+  if (p1LifecycleChart) p1LifecycleChart.destroy();
+
+  const phases = Object.keys(byLifecycle).sort((a,b) => byLifecycle[b].total - byLifecycle[a].total);
+  const gridColor = getCSS('--chart-grid'); const textColor = getCSS('--chart-text');
+
+  p1LifecycleChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: phases,
+      datasets: [
+        { label: 'Filled', data: phases.map(p => byLifecycle[p].filled), backgroundColor: getCSS('--success'), borderRadius: 3 },
+        { label: 'Blank', data: phases.map(p => byLifecycle[p].blank), backgroundColor: getCSS('--danger'), borderRadius: 3 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+      plugins: { legend: { labels: { color: textColor, font: { size: 11 } } },
+        tooltip: { callbacks: { afterBody: function(items) { const pct = byLifecycle[items[0].label]?.pct; return pct != null ? 'Completion: '+pct+'%' : ''; } } }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor }, title: { display: true, text: 'Count', color: textColor, font: { size: 11 } } },
+        y: { stacked: true, ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor } },
+      }
+    }
+  });
+  p1LifecycleChart._lifecycleData = byLifecycle;
+}
+
+// ===== Phase I Batch =====
+async function runP1Batch() {
+  const offset = parseInt(document.getElementById('p1-offset').value) || 0;
+  const limit = parseInt(document.getElementById('p1-limit').value) || 100;
+  const btn = document.getElementById('p1-batch-btn');
+  const progress = document.getElementById('p1-batch-progress');
+  const result = document.getElementById('p1-batch-result');
+
+  btn.disabled = true; btn.textContent = 'Running...';
+  progress.style.display = 'block'; result.style.display = 'none';
+  progress.innerHTML = `Processing items ${offset} to ${offset + limit}...<div class="progress-bar" style="margin-top:8px;height:3px;background:var(--border);border-radius:99px;overflow:hidden;"><div class="progress-fill pulse" style="width:60%;height:100%;background:var(--accent);border-radius:99px;"></div></div>`;
+
+  try {
+    const r = await fetch(`${API}/api/phase1/batch/run`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ offset, limit, vector_top_k: 10 })
+    });
+    const data = await r.json();
+    if (data.job_id) {
+      startP1Poll(data.job_id);
+    } else {
+      progress.style.display = 'none';
+      result.style.display = 'block';
+      result.style.background = '#450a0a'; result.style.color = 'var(--danger)';
+      result.textContent = 'Error starting batch: ' + JSON.stringify(data);
+      btn.disabled = false; btn.textContent = 'Run AI Batch';
+    }
+  } catch(e) {
+    progress.style.display = 'none';
+    result.style.display = 'block';
+    result.style.background = '#450a0a'; result.style.color = 'var(--danger)';
+    result.textContent = 'Error: ' + e.message;
+    btn.disabled = false; btn.textContent = 'Run AI Batch';
+  }
+}
+
+function startP1Poll(jobId) {
+  if (p1PollTimer) clearInterval(p1PollTimer);
+  p1PollTimer = setInterval(async () => {
+    try {
+      const r = await fetch(`${API}/api/batch/${jobId}/status`);
+      const job = await r.json();
+      if (job.status === 'done') {
+        clearInterval(p1PollTimer); p1PollTimer = null;
+        document.getElementById('p1-batch-progress').style.display = 'none';
+        const res = document.getElementById('p1-batch-result');
+        res.style.display = 'block';
+        res.style.background = '#14532d'; res.style.color = 'var(--success)';
+        res.innerHTML = `Batch complete: <strong>${job.total}</strong> items processed ` +
+          `(High: ${job.high}, Medium: ${job.medium}, Low: ${job.low}, Error: ${job.error || 0}). ` +
+          `<strong>${job.written_to_excel || 0}</strong> High/Medium results written to Excel.`;
+        document.getElementById('p1-batch-btn').disabled = false;
+        document.getElementById('p1-batch-btn').textContent = 'Run AI Batch';
+        // Auto-advance offset
+        const offset = parseInt(document.getElementById('p1-offset').value) || 0;
+        const limit = parseInt(document.getElementById('p1-limit').value) || 100;
+        document.getElementById('p1-offset').value = offset + limit;
+      } else if (job.status === 'error') {
+        clearInterval(p1PollTimer); p1PollTimer = null;
+        document.getElementById('p1-batch-progress').style.display = 'none';
+        const res = document.getElementById('p1-batch-result');
+        res.style.display = 'block';
+        res.style.background = '#450a0a'; res.style.color = 'var(--danger)';
+        res.textContent = 'Error: ' + (job.error || 'unknown');
+        document.getElementById('p1-batch-btn').disabled = false;
+        document.getElementById('p1-batch-btn').textContent = 'Run AI Batch';
+      }
+    } catch(e) { /* keep polling */ }
+  }, 3000);
+}
+
+// ===== Phase I Detail Table =====
+function setP1Filter(mode) {
+  p1Filter = mode;
+  document.querySelectorAll('[data-p1filter]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.p1filter === mode);
+  });
+  p1Page = 1;
+  loadP1Details();
+}
+
+async function loadP1Details() {
+  const lifecycle = document.getElementById('p1-lifecycle-filter').value;
+  document.getElementById('p1-detail-loading').style.display = 'flex';
+  document.getElementById('p1-detail-table-wrap').style.display = 'none';
+  document.getElementById('p1-detail-empty').style.display = 'none';
+  document.getElementById('p1-pagination').style.display = 'none';
+
+  try {
+    let url = `${API}/api/kpi/phase1/details?filter=${p1Filter}`;
+    if (lifecycle) url += `&lifecycle=${encodeURIComponent(lifecycle)}`;
+    const r = await fetch(url);
+    const data = await r.json();
+    p1Details = data.items || [];
+    p1Sort = { col: null, asc: true };
+    p1Page = 1;
+
+    document.getElementById('p1-detail-loading').style.display = 'none';
+    if (p1Details.length === 0) {
+      document.getElementById('p1-detail-empty').style.display = 'block';
+      document.getElementById('p1-detail-empty').textContent = 'No items found.';
+    } else {
+      renderP1Page();
+    }
+    document.getElementById('p1-detail-showing').textContent = p1Details.length.toLocaleString();
+  } catch(e) {
+    document.getElementById('p1-detail-loading').style.display = 'none';
+    document.getElementById('p1-detail-empty').style.display = 'block';
+    document.getElementById('p1-detail-empty').textContent = 'Error: ' + e.message;
+  }
+}
+
+function sortP1Detail(col) {
+  if (p1Sort.col === col) { p1Sort.asc = !p1Sort.asc; }
+  else { p1Sort.col = col; p1Sort.asc = true; }
+  document.querySelectorAll('#p1-detail-table th').forEach(th => {
+    th.classList.remove('sorted');
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.innerHTML = '&#x25B2;';
+  });
+  const activeTh = document.querySelector(`#p1-detail-table th[data-p1col="${col}"]`);
+  if (activeTh) {
+    activeTh.classList.add('sorted');
+    const arrow = activeTh.querySelector('.sort-arrow');
+    if (arrow) arrow.innerHTML = p1Sort.asc ? '&#x25B2;' : '&#x25BC;';
+  }
+  p1Details.sort((a, b) => {
+    let va = String(a[col]||'').toLowerCase(), vb = String(b[col]||'').toLowerCase();
+    if (va < vb) return p1Sort.asc ? -1 : 1;
+    if (va > vb) return p1Sort.asc ? 1 : -1;
+    return 0;
+  });
+  p1Page = 1; renderP1Page();
+}
+
+function renderP1Page() {
+  const totalPages = Math.ceil(p1Details.length / PAGE_SIZE);
+  const start = (p1Page - 1) * PAGE_SIZE;
+  const rows = p1Details.slice(start, start + PAGE_SIZE);
+  const tbody = document.getElementById('p1-detail-tbody');
+  tbody.innerHTML = '';
+  rows.forEach(row => {
+    const hasCat = (row.MATERIAL_CATEGORY || '').trim() !== '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-family:var(--mono);font-size:0.72rem;font-weight:600">${esc(row.Item_Number)}</td>
+      <td class="wrap-cell" style="max-width:320px" title="${esc(row.Item_Desc)}">${esc(truncate(row.Item_Desc, 80))}</td>
+      <td>${hasCat ? '<span class="cat-badge filled">'+esc(row.MATERIAL_CATEGORY)+'</span>' : '<span class="cat-badge blank">BLANK</span>'}</td>
+      <td style="font-size:0.72rem">${esc(row.LifeCycle_Phase)}</td>
+      <td style="font-size:0.72rem">${esc(row.MANUFACTURE_NAME)}</td>
+      <td style="font-family:var(--mono);font-size:0.72rem">${esc(row.MFR_PART_NUMBER)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('p1-detail-table-wrap').style.display = 'block';
+  document.getElementById('p1-detail-empty').style.display = 'none';
+  const pag = document.getElementById('p1-pagination');
+  if (totalPages > 1) {
+    pag.style.display = 'flex';
+    document.getElementById('p1-prev-btn').disabled = p1Page <= 1;
+    document.getElementById('p1-next-btn').disabled = p1Page >= totalPages;
+    document.getElementById('p1-page-info').textContent = `Page ${p1Page} of ${totalPages}`;
+  } else { pag.style.display = 'none'; }
+}
+
+function changeP1Page(delta) {
+  const totalPages = Math.ceil(p1Details.length / PAGE_SIZE);
+  p1Page = Math.max(1, Math.min(totalPages, p1Page + delta));
+  renderP1Page();
+  document.getElementById('p1-detail-table-wrap').scrollTop = 0;
+}
+
+// ===== Init =====
+loadConfig();
+loadLatest();
+loadSnapshots();
+loadP1Latest();
+loadP1Snapshots();
+</script>
+</body>
+</html>

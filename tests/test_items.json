@@ -1,0 +1,25 @@
+{
+  "description": "Standard test items for validating categorization pipeline changes",
+  "items": [
+    {
+      "item_number": "14TJ5620269-7",
+      "description": "Intel CPLD 5M1270ZT144C5N 144TQFP",
+      "expected_category_hint": "PLD|CPLD or PLD|FPGA"
+    },
+    {
+      "item_number": "14TJ2612832-8",
+      "description": "Micron Flash MT25QL128ABA 128Mb NOR",
+      "expected_category_hint": "FLH|* (Flash memory)"
+    },
+    {
+      "item_number": "14TJ1090124-8",
+      "description": "Analog Devices AD822ARZ Op Amp",
+      "expected_category_hint": "OPA|* (Op Amp) or LIN|* (Linear IC)"
+    },
+    {
+      "item_number": "14TJ3256468-7",
+      "description": "Epson RTC RX-8564LC",
+      "expected_category_hint": "CLK|RTCX (Real-Time Clock)"
+    }
+  ]
+}
