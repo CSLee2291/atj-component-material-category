@@ -6,9 +6,13 @@ and parses the suggested ZZMCATG_M, ZZMCATG_S, and reasoning.
 Uses the openai SDK (AsyncAzureOpenAI).
 """
 import json
+import os
 import re
+import logging
 from openai import AsyncAzureOpenAI
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _clean_category_code(val: str) -> str:
@@ -27,14 +31,91 @@ def _clean_category_code(val: str) -> str:
     return val
 
 
+# ---------------------------------------------------------------------------
+# Valid [MATERIAL_CATEGORY] whitelist
+# ---------------------------------------------------------------------------
+# GPT must only suggest MATERIAL_CATEGORY values that exist in the PLM database
+# (distinct_categories cache). This prevents hallucinated codes like "CLK|CLKX"
+# which don't actually exist (correct value is CLK|CLKG).
+
+_VALID_CATEGORIES_SET: set[str] | None = None
+_VALID_CATEGORIES_BLOCK: str | None = None
+
+
+def _load_valid_categories() -> tuple[set[str], str]:
+    """
+    Load the authoritative list of valid MATERIAL_CATEGORY values from
+    distinct_categories.parquet. Returns (set_for_lookup, formatted_block_for_prompt).
+    Cached on first call.
+    """
+    global _VALID_CATEGORIES_SET, _VALID_CATEGORIES_BLOCK
+    if _VALID_CATEGORIES_SET is not None and _VALID_CATEGORIES_BLOCK is not None:
+        return _VALID_CATEGORIES_SET, _VALID_CATEGORIES_BLOCK
+
+    valid_set: set[str] = set()
+    formatted_lines: list[str] = []
+    try:
+        import pandas as pd
+        cache_path = os.path.join(settings.target_cache_dir, "distinct_categories.parquet")
+        if os.path.exists(cache_path):
+            df = pd.read_parquet(cache_path)
+            # Keep only rows with valid M|S pair
+            df = df.dropna(subset=["ZZMCATG_M", "ZZMCATG_S"])
+            df = df[(df["ZZMCATG_M"].astype(str).str.strip() != "")
+                    & (df["ZZMCATG_S"].astype(str).str.strip() != "")]
+            df = df.sort_values(["ZZMCATG_M", "ZZMCATG_S"]).reset_index(drop=True)
+            for _, r in df.iterrows():
+                m = str(r["ZZMCATG_M"]).strip()
+                s = str(r["ZZMCATG_S"]).strip()
+                mc = f"{m}|{s}"
+                valid_set.add(mc)
+                m_name = str(r.get("CATE_M_NAME", "") or "").strip()
+                s_name = str(r.get("CATE_S_NAME", "") or "").strip()
+                formatted_lines.append(f"  {mc}  ({m_name} > {s_name})")
+    except Exception as e:
+        logger.warning("Could not load valid categories whitelist: %s", e)
+
+    _VALID_CATEGORIES_SET = valid_set
+    _VALID_CATEGORIES_BLOCK = "\n".join(formatted_lines) if formatted_lines else "(whitelist unavailable)"
+    return _VALID_CATEGORIES_SET, _VALID_CATEGORIES_BLOCK
+
+
+def _valid_categories_block() -> str:
+    _, block = _load_valid_categories()
+    return block
+
+
+def _is_valid_category(material_category: str) -> bool:
+    """True if MATERIAL_CATEGORY exists in the distinct_categories whitelist."""
+    valid, _ = _load_valid_categories()
+    if not valid:
+        # Whitelist unavailable — do not block, just accept.
+        return True
+    return material_category in valid
+
+
 def _clean_gpt_result(result: dict) -> dict:
-    """Post-process GPT JSON to ensure ZZMCATG_M/S are code-only and rebuild MATERIAL_CATEGORY."""
+    """Post-process GPT JSON to ensure ZZMCATG_M/S are code-only, rebuild MATERIAL_CATEGORY,
+    and validate against the distinct_categories whitelist."""
     if "ZZMCATG_M" in result:
         result["ZZMCATG_M"] = _clean_category_code(result["ZZMCATG_M"])
     if "ZZMCATG_S" in result:
         result["ZZMCATG_S"] = _clean_category_code(result["ZZMCATG_S"])
     if "ZZMCATG_M" in result and "ZZMCATG_S" in result:
         result["MATERIAL_CATEGORY"] = f"{result['ZZMCATG_M']}|{result['ZZMCATG_S']}"
+
+    # Whitelist validation: if GPT emitted a code not in [MATERIAL_CATEGORY],
+    # downgrade confidence and prepend a warning to reason so CE can review.
+    mc = result.get("MATERIAL_CATEGORY", "")
+    if mc and not _is_valid_category(mc):
+        orig_reason = result.get("reason", "")
+        result["confidence"] = "low"
+        result["reason"] = (
+            f"[INVALID_CATEGORY: '{mc}' is NOT in the [MATERIAL_CATEGORY] whitelist] "
+            + orig_reason
+        )
+        # Flag the invalid output so downstream code (e.g. pipeline fallback) can detect it
+        result["invalid_category"] = True
     return result
 
 
@@ -179,6 +260,26 @@ CATE_M_NAME and CATE_S_NAME shown in references are descriptive names — do NOT
 CRITICAL: ZZMCATG_M and ZZMCATG_S must be SHORT CODES ONLY (typically 2-4 uppercase letters).
 Do NOT include descriptive names like "DAC (DATA CONVERTER)" — just return "DAC".
 
+================================================================================
+*** HARD CONSTRAINT — VALID [MATERIAL_CATEGORY] WHITELIST ***
+================================================================================
+Your output MATERIAL_CATEGORY value MUST be one of the valid (ZZMCATG_M|ZZMCATG_S)
+pairs listed below. These are the ONLY values that exist in Advantech's PLM
+[MATERIAL_CATEGORY] master data. Any pair NOT on this list is INVALID — the PLM
+system will reject it. Common hallucination example: "CLK|CLKX" does NOT exist;
+the correct clock-generator code is "CLK|CLKG".
+
+BEFORE returning, you MUST:
+  1. Construct your candidate MATERIAL_CATEGORY (M|S).
+  2. Search for that exact string in the whitelist below.
+  3. If it is NOT present, pick the closest semantically-matching pair that IS
+     present. Do NOT invent new codes. Do NOT guess a pattern.
+  4. Re-verify your final answer is in the whitelist.
+
+VALID [MATERIAL_CATEGORY] values (each line is one allowed pair):
+{_valid_categories_block()}
+================================================================================
+
 {ITEM_DESC_PREFIX_GUIDE}
 
 Rules:
@@ -186,7 +287,8 @@ Rules:
 - If the prefix clearly indicates a component type but references suggest a different category, trust the prefix + MPN analysis over weak similarity matches.
 - Always respond in valid JSON only, no markdown, no explanation outside the JSON.
 - If confidence is low, set confidence to "low" and explain why in reason.
-- Suggest only category codes that appear in the reference items provided.
+- Suggest only category codes that appear in the VALID [MATERIAL_CATEGORY] whitelist above. Reference items may also be used as a hint, but the whitelist is the authoritative source.
+- If no whitelist pair is a good match, set confidence to "low" and pick the best available whitelist pair anyway — NEVER invent a code that is not in the whitelist.
 - JSON format: {{"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "confidence": "high|medium|low", "reason": "..."}}
 """
 
@@ -242,13 +344,30 @@ CRITICAL: ZZMCATG_M and ZZMCATG_S must be SHORT CODES ONLY (typically 2-4 upperc
 Do NOT include descriptive names in the code fields. Example: return "DAC" not "DAC (DATA CONVERTER)".
 The descriptive names (CATE_M_NAME, CATE_S_NAME) go in their own separate fields.
 
+================================================================================
+*** HARD CONSTRAINT — VALID [MATERIAL_CATEGORY] WHITELIST ***
+================================================================================
+You MUST pick one of the candidate categories provided in the user message.
+ALL provided candidates are drawn from Advantech's authoritative
+[MATERIAL_CATEGORY] master data, so picking any listed candidate is safe.
+However, to be extra careful:
+  1. The MATERIAL_CATEGORY value you return MUST appear verbatim in the
+     candidate list below AND in the whitelist below.
+  2. Do NOT modify, shorten, or "correct" any candidate code — copy it exactly.
+  3. Do NOT invent codes. Hallucinated pairs like "CLK|CLKX" will be rejected
+     (the correct clock-generator code is "CLK|CLKG").
+
+VALID [MATERIAL_CATEGORY] values (each line is one allowed pair):
+{_valid_categories_block()}
+================================================================================
+
 {ITEM_DESC_PREFIX_GUIDE}
 
 Rules:
 - Use the Item_Desc prefix guide above to identify the component type FIRST, then select the best matching candidate.
 - If the prefix clearly indicates a component type, prefer candidates that match that type even if vector similarity is slightly lower.
 - Always respond in valid JSON only, no markdown, no explanation outside the JSON.
-- You MUST pick one of the provided candidate categories. Do not invent new codes.
+- You MUST pick one of the provided candidate categories AND that pick must be present in the VALID [MATERIAL_CATEGORY] whitelist above. Do not invent new codes.
 - Consider the component's description and the first GPT analysis reason when choosing.
 - JSON format: {{"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "CATE_M_NAME": "...", "CATE_S_NAME": "...", "confidence": "high|medium|low", "reason": "..."}}
 """
