@@ -42,6 +42,11 @@ def _denodo_available() -> bool:
         return False
 
 
+def _pbi_enabled() -> bool:
+    """Check if Power BI Desktop fallback is enabled via PBI_ENABLED in .env."""
+    return settings.pbi_enabled
+
+
 # ---------------------------------------------------------------------------
 # 1. Fetch all ATJ targets (for cache refresh)
 # ---------------------------------------------------------------------------
@@ -82,6 +87,9 @@ def _fetch_all_atj_targets() -> pd.DataFrame:
         except Exception as e:
             logger.warning("Denodo failed for ATJ targets, falling back to PBI: %s", e)
 
+    if not _pbi_enabled():
+        logger.warning("Denodo failed and PBI is disabled — returning empty targets")
+        return pd.DataFrame()
     logger.info("Fetching ATJ targets from PBI...")
     from core.pbi_fetcher import _fetch_all_atj_targets_from_pbi
     return _fetch_all_atj_targets_from_pbi()
@@ -177,8 +185,8 @@ def fetch_distinct_categories(force_refresh: bool = False) -> pd.DataFrame:
             logger.warning("Denodo failed for categories, falling back to PBI: %s", e)
             df = None
 
-    # Fallback to PBI
-    if df is None or df.empty:
+    # Fallback to PBI (only if enabled)
+    if (df is None or df.empty) and _pbi_enabled():
         try:
             from core.pbi_fetcher import fetch_distinct_categories as pbi_fetch_categories
             return pbi_fetch_categories(force_refresh=force_refresh)
@@ -229,28 +237,75 @@ def fetch_manufacture_for_items(item_numbers: list[str]) -> pd.DataFrame:
     """
     Returns MANUFACTURE_NAME + MFR_PART_NUMBER for the given items.
     One item may have multiple rows (1:many).
+
+    Priority:
+      1. Local refpool cache (has MPN data for ~496 reference items)
+      2. Denodo REST API (individual item queries)
+      3. Power BI Desktop (fallback)
+      4. Return empty DataFrame (pipeline handles missing MPN gracefully)
     """
     if not item_numbers:
         return pd.DataFrame()
 
-    # Try Denodo first
+    item_set = set(item_numbers)
+    found_frames = []
+
+    # --- Try refpool cache (has MANUFACTURE_NAME + MFR_PART_NUMBER) ---
+    if os.path.exists(_REFPOOL_CACHE_FILE):
+        try:
+            refpool_df = pd.read_parquet(_REFPOOL_CACHE_FILE)
+            needed_cols = ["Item_Number", "MANUFACTURE_NAME", "MFR_PART_NUMBER"]
+            available_cols = [c for c in needed_cols if c in refpool_df.columns]
+            if len(available_cols) == len(needed_cols):
+                ref_found = refpool_df[refpool_df["Item_Number"].isin(item_set)][needed_cols].reset_index(drop=True)
+                if not ref_found.empty:
+                    found_frames.append(ref_found)
+                    item_set -= set(ref_found["Item_Number"].tolist())
+                    logger.debug("Refpool cache returned %d manufacture rows", len(ref_found))
+        except Exception as e:
+            logger.debug("Refpool cache read for manufacture failed: %s", e)
+
+    if not item_set:
+        return pd.concat(found_frames, ignore_index=True) if found_frames else pd.DataFrame()
+
+    remaining = list(item_set)
+
+    # --- Try Denodo (individual item queries to avoid IN clause issues) ---
     if _denodo_available():
         try:
             from core.denodo_client import fetch_manufacture_small
-            # Build VQL IN clause
-            items_str = ",".join(f"'{n}'" for n in item_numbers)
-            filter_expr = f"ITEM_NUMBER IN ({items_str})"
-            df = fetch_manufacture_small(
-                filter_expr=filter_expr,
-                select=["ITEM_NUMBER", "MANUFACTURE_NAME", "MFR_PART_NUMBER"],
-            )
-            logger.debug("Denodo returned %d manufacture rows", len(df))
-            return df
+            denodo_frames = []
+            for item_no in remaining:
+                try:
+                    df = fetch_manufacture_small(
+                        filter_expr=f"ITEM_NUMBER = '{item_no}'",
+                        select=["ITEM_NUMBER", "MANUFACTURE_NAME", "MFR_PART_NUMBER"],
+                    )
+                    if not df.empty:
+                        denodo_frames.append(df)
+                except Exception:
+                    break  # If one fails, Denodo filter is down — stop trying
+            if denodo_frames:
+                denodo_result = pd.concat(denodo_frames, ignore_index=True)
+                found_frames.append(denodo_result)
+                logger.debug("Denodo returned %d manufacture rows", len(denodo_result))
+                return pd.concat(found_frames, ignore_index=True)
         except Exception as e:
-            logger.warning("Denodo failed for manufacture data, falling back to PBI: %s", e)
+            logger.warning("Denodo failed for manufacture data: %s", e)
 
-    from core.pbi_fetcher import fetch_manufacture_for_items as pbi_fetch_mfr
-    return pbi_fetch_mfr(item_numbers)
+    # --- Try PBI fallback (only if enabled) ---
+    if _pbi_enabled():
+        try:
+            from core.pbi_fetcher import fetch_manufacture_for_items as pbi_fetch_mfr
+            pbi_result = pbi_fetch_mfr(remaining)
+            if not pbi_result.empty:
+                found_frames.append(pbi_result)
+        except Exception as e:
+            logger.warning("PBI also failed for manufacture data: %s — continuing without MPN", e)
+    else:
+        logger.debug("PBI disabled — skipping manufacture fallback for %d items", len(remaining))
+
+    return pd.concat(found_frames, ignore_index=True) if found_frames else pd.DataFrame()
 
 
 # ---------------------------------------------------------------------------
@@ -260,27 +315,94 @@ def fetch_manufacture_for_items(item_numbers: list[str]) -> pd.DataFrame:
 def fetch_items_info(item_numbers: list[str]) -> pd.DataFrame:
     """
     Returns Item_Desc, LifeCycle_Phase, MATERIAL_CATEGORY for specific items.
+
+    Priority:
+      1. Local Parquet cache (fast, no network)
+      2. Denodo REST API (batched, 10 items per request)
+      3. Power BI Desktop (fallback)
     """
     if not item_numbers:
         return pd.DataFrame()
 
-    # Try Denodo first
-    if _denodo_available():
+    item_set = set(item_numbers)
+
+    # --- Try local cache first (fastest) ---
+    if os.path.exists(_TARGET_CACHE_FILE):
+        try:
+            cache_df = pd.read_parquet(_TARGET_CACHE_FILE)
+            needed_cols = ["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"]
+            available_cols = [c for c in needed_cols if c in cache_df.columns]
+            found = cache_df[cache_df["Item_Number"].isin(item_set)][available_cols].reset_index(drop=True)
+            if not found.empty:
+                logger.debug("Cache returned %d / %d items info", len(found), len(item_numbers))
+                # If cache has all requested items, return immediately
+                if len(found) >= len(item_set):
+                    return found
+                # Otherwise, cache has partial results — try Denodo for the rest
+                missing = item_set - set(found["Item_Number"].tolist())
+                logger.debug("Cache missing %d items, trying Denodo", len(missing))
+                item_numbers = list(missing)
+                item_set = missing
+        except Exception as e:
+            logger.debug("Cache read failed: %s", e)
+
+    # Also check refpool cache (items with existing categories)
+    if os.path.exists(_REFPOOL_CACHE_FILE) and item_set:
+        try:
+            refpool_df = pd.read_parquet(_REFPOOL_CACHE_FILE)
+            needed_cols = ["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"]
+            available_cols = [c for c in needed_cols if c in refpool_df.columns]
+            ref_found = refpool_df[refpool_df["Item_Number"].isin(item_set)][available_cols].reset_index(drop=True)
+            if not ref_found.empty:
+                logger.debug("Refpool cache returned %d additional items", len(ref_found))
+                if 'found' in dir():
+                    found = pd.concat([found, ref_found], ignore_index=True)
+                else:
+                    found = ref_found
+                remaining = item_set - set(ref_found["Item_Number"].tolist())
+                if not remaining:
+                    return found
+                item_numbers = list(remaining)
+                item_set = remaining
+        except Exception as e:
+            logger.debug("Refpool cache read failed: %s", e)
+
+    # --- Try Denodo (batched, 10 items per request) ---
+    if item_numbers and _denodo_available():
+        DENODO_BATCH = 10
         try:
             from core.denodo_client import fetch_allparts
-            items_str = ",".join(f"'{n}'" for n in item_numbers)
-            filter_expr = f"Item_Number IN ({items_str})"
-            df = fetch_allparts(
-                filter_expr=filter_expr,
-                select=["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"],
-            )
-            logger.debug("Denodo returned %d items info rows", len(df))
-            return df
+            frames = []
+            for i in range(0, len(item_numbers), DENODO_BATCH):
+                batch = item_numbers[i:i + DENODO_BATCH]
+                items_str = ",".join(f"'{n}'" for n in batch)
+                filter_expr = f"Item_Number IN ({items_str})"
+                df = fetch_allparts(
+                    filter_expr=filter_expr,
+                    select=["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"],
+                )
+                if not df.empty:
+                    frames.append(df)
+            if frames:
+                denodo_result = pd.concat(frames, ignore_index=True)
+                logger.debug("Denodo returned %d items info rows", len(denodo_result))
+                if 'found' in dir() and not found.empty:
+                    return pd.concat([found, denodo_result], ignore_index=True)
+                return denodo_result
         except Exception as e:
-            logger.warning("Denodo failed for items info, falling back to PBI: %s", e)
+            logger.warning("Denodo failed for items info: %s", e)
 
-    from core.pbi_fetcher import fetch_items_info as pbi_fetch_items
-    return pbi_fetch_items(item_numbers)
+    # Return whatever we found from cache
+    if 'found' in dir() and not found.empty:
+        return found
+
+    # --- Final fallback: PBI (only if enabled) ---
+    if _pbi_enabled():
+        from core.pbi_fetcher import fetch_items_info as pbi_fetch_items
+        return pbi_fetch_items(item_numbers)
+
+    logger.debug("PBI disabled — no data found for %d items", len(item_numbers))
+    return pd.DataFrame()
 
 
 # ---------------------------------------------------------------------------
@@ -325,10 +447,17 @@ def fetch_atj_reference_pool(force_refresh: bool = False) -> pd.DataFrame:
             logger.warning("Denodo failed for reference pool, falling back to PBI: %s", e)
             df = None
 
-    # Fallback to PBI
+    # Fallback to PBI (only if enabled)
     if df is None or df.empty:
-        from core.pbi_fetcher import fetch_atj_reference_pool as pbi_fetch_refpool
-        return pbi_fetch_refpool(force_refresh=force_refresh)
+        if _pbi_enabled():
+            from core.pbi_fetcher import fetch_atj_reference_pool as pbi_fetch_refpool
+            return pbi_fetch_refpool(force_refresh=force_refresh)
+        # No PBI — try using cached refpool
+        if os.path.exists(_REFPOOL_CACHE_FILE):
+            logger.warning("Denodo failed, PBI disabled — using cached refpool")
+            return pd.read_parquet(_REFPOOL_CACHE_FILE)
+        logger.warning("Denodo failed, PBI disabled, no cache — returning empty refpool")
+        return pd.DataFrame()
 
     os.makedirs(_CACHE_DIR, exist_ok=True)
     df.to_parquet(_REFPOOL_CACHE_FILE, index=False)

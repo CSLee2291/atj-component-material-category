@@ -433,6 +433,9 @@ async def _run_phase1_batch(job_id: str, offset: int, limit: int, vector_top_k: 
             "results":         results_records,
         })
     except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"Phase1 batch error: {tb}")
         _jobs[job_id].update({"status": "error", "error": str(e)})
 
 

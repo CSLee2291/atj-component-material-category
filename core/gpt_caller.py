@@ -38,7 +38,94 @@ def _clean_gpt_result(result: dict) -> dict:
     return result
 
 
-SYSTEM_PROMPT = """You are a PLM (Product Lifecycle Management) component categorization expert
+ITEM_DESC_PREFIX_GUIDE = """
+== Advantech Item_Desc Prefix Decoding Guide ==
+
+Item_Desc follows the pattern: @PREFIX MANUFACTURER_PART INFO
+The @PREFIX at the start of Item_Desc encodes the component type. Use this to determine the correct category.
+
+--- English Prefixes (30+ types) ---
+@R        → Resistor (check suffix: chip, array, network, cement, carbon film, metal film, current sense, potentiometer, trimmer, thermistor NTC/PTC, varistor)
+@C        → Capacitor (check suffix: MLCC ceramic, electrolytic aluminum, electrolytic polymer, tantalum, film, super/EDLC)
+@CN       → Connector (check suffix: board-to-board, FFC/FPC, pin header, socket, terminal block, D-Sub, USB, RJ45, M.2, PCIe, SATA, SIM, SD, power)
+@TR       → Transistor (check suffix: MOSFET, BJT, IGBT, JFET, darlington)
+@LIN      → Linear IC (check suffix: OpAmp, voltage regulator LDO, voltage reference, comparator, analog switch/MUX, current sense amp, instrumentation amp, power management PMIC)
+@LOG      → Logic IC (check suffix: buffer, gate AND/OR/NAND/NOR/XOR, flip-flop, latch, shift register, counter, level translator, bus transceiver)
+@D        → Diode (check suffix: rectifier, Schottky, Zener, TVS, signal, fast recovery, bridge rectifier, LED)
+@SA       → Surge Absorber / TVS array / ESD protector
+@X        → Relay (electromechanical)
+@RELAY    → Relay (same as @X)
+@OSC      → Oscillator / Crystal (check suffix: crystal unit, crystal oscillator TCXO/VCXO/OCXO, ceramic resonator, MEMS oscillator, SAW)
+@CNV      → DC-DC Converter module / Power module
+@L        → Inductor / Coil (check suffix: chip inductor, power inductor, common-mode choke, ferrite bead)
+@TF       → Transformer (check suffix: pulse, gate drive, power, LAN/Ethernet, audio, isolation)
+@F        → Fuse (check suffix: chip fuse, PTC resettable, glass tube, SMD)
+@SW       → Switch (check suffix: tact switch, DIP switch, slide, toggle, rocker, push-button, rotary encoder)
+@LED      → LED (check suffix: standard, high-power, SMD, through-hole, IR, UV). Category: LED|LEDS for SMD/surface-mount, LED|LEDD for DIP/through-hole
+@PH       → Photo device (check suffix: phototransistor, photodiode, photo interrupter, optocoupler, photo IC)
+@PHT      → LED display / LED indicator component — includes LED digit display (7-segment, numeric, alphanumeric), LED dot matrix, LED bar graph, LED light pipe, single LED. Category: LED|LEDS for SMD/surface-mount, LED|LEDD for DIP/through-hole. Example: "@PHT LF-3011MA ﾛ-ﾑ@GRN" = ROHM LF-3011MA SMD 1-digit LED display → LED|LEDS
+@IC       → IC general (check suffix: microcontroller MCU, interface UART/SPI/I2C/Ethernet/CAN/RS-232/RS-485, timer, RTC, EEPROM, watchdog, motor driver, audio codec)
+@FPGA     → FPGA / CPLD
+@DSP      → Digital Signal Processor
+@ADC      → A/D Converter IC
+@DAC      → D/A Converter IC
+@CODEC    → Audio/Video Codec
+@AMP      → Amplifier module
+@SEN      → Sensor (check suffix: temperature, humidity, pressure, accelerometer, gyroscope, gas, current, hall effect)
+@MOD      → Module (check suffix: wireless, Bluetooth, Wi-Fi, LTE/5G, GPS, LoRa, Zigbee)
+@FAN      → Fan / Cooling device
+@BAT      → Battery / Battery holder
+@MTR      → Motor / Actuator
+@BUZZER   → Buzzer / Speaker
+@ANT      → Antenna
+
+--- Japanese Katakana Prefixes (15 types) ---
+@コア         → Core / Ferrite core
+@ブレーカ     → Breaker / Circuit breaker
+@センサ       → Sensor
+@ジャック     → Jack (audio, DC power, phone)
+@スイッチ     → Switch
+@コネクタ     → Connector
+@リレー       → Relay
+@トランス     → Transformer
+@コイル       → Coil / Inductor
+@ヒューズ     → Fuse
+@バリスタ     → Varistor
+@ダイオード   → Diode
+@コンデンサ   → Capacitor
+@ボリューム   → Volume / Potentiometer
+@ファン       → Fan
+
+--- Category-Level Rules ---
+IMPORTANT: "DISPLAY MODULE" (ZZMCATG_M) is for semi-products and assembled modules ONLY, NOT for individual components.
+For individual LED components (including LED displays, 7-segment, dot matrix, LED indicators, single LEDs):
+  - SMD / surface-mount package → LED|LEDS
+  - DIP / through-hole package → LED|LEDD
+Package clues: "SMD", "SMT", "CHIP", "SOJ", "SOP" = surface-mount → LEDS. "DIP", "THT", "THRU-HOLE", "AR" (axial/radial) = through-hole → LEDD.
+
+--- Special Keyword Fallback ---
+When the prefix is ambiguous or absent, look for these keywords ANYWHERE in Item_Desc or MFR_PART_NUMBER:
+FPGA        → FPGA category
+ARM / CORTEX → Microcontroller (MCU)
+FLASH       → Flash Memory
+RELAY       → Relay
+MOSFET      → MOSFET transistor
+IGBT        → IGBT transistor
+EEPROM      → EEPROM Memory
+SRAM / DRAM / SDRAM / DDR → Memory (volatile)
+NAND / NOR FLASH → Flash Memory (non-volatile)
+LDO         → Voltage Regulator (linear)
+BUCK / BOOST → DC-DC Converter (switching)
+OPAMP / OP-AMP → Operational Amplifier
+COMPARATOR  → Comparator
+UART / SPI / I2C / CAN / RS-232 / RS-485 / USB / Ethernet → Interface IC
+PWM         → PWM Controller
+PLL         → PLL / Clock IC
+RTC         → Real-Time Clock
+WATCHDOG / WDT → Watchdog Timer
+"""
+
+SYSTEM_PROMPT = f"""You are a PLM (Product Lifecycle Management) component categorization expert
 for Advantech. Your task is to assign the correct MATERIAL_CATEGORY to an electronic component
 based on its description, manufacturer part number, and the categories of similar components.
 
@@ -50,11 +137,15 @@ CATE_M_NAME and CATE_S_NAME shown in references are descriptive names — do NOT
 CRITICAL: ZZMCATG_M and ZZMCATG_S must be SHORT CODES ONLY (typically 2-4 uppercase letters).
 Do NOT include descriptive names like "DAC (DATA CONVERTER)" — just return "DAC".
 
+{ITEM_DESC_PREFIX_GUIDE}
+
 Rules:
+- Use the Item_Desc prefix guide above to identify the component type FIRST, then cross-check with reference items.
+- If the prefix clearly indicates a component type but references suggest a different category, trust the prefix + MPN analysis over weak similarity matches.
 - Always respond in valid JSON only, no markdown, no explanation outside the JSON.
 - If confidence is low, set confidence to "low" and explain why in reason.
 - Suggest only category codes that appear in the reference items provided.
-- JSON format: {"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "confidence": "high|medium|low", "reason": "..."}
+- JSON format: {{"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "confidence": "high|medium|low", "reason": "..."}}
 """
 
 # Lazy-init client (created on first call)
@@ -99,7 +190,7 @@ Based on the above, suggest ZZMCATG_M and ZZMCATG_S for the target component.
 Respond with valid JSON only."""
 
 
-CATEGORY_SELECT_SYSTEM_PROMPT = """You are a PLM (Product Lifecycle Management) component categorization expert
+CATEGORY_SELECT_SYSTEM_PROMPT = f"""You are a PLM (Product Lifecycle Management) component categorization expert
 for Advantech. You are given a target electronic component and a list of candidate MATERIAL_CATEGORY options
 retrieved from a vector similarity search.
 
@@ -109,11 +200,15 @@ CRITICAL: ZZMCATG_M and ZZMCATG_S must be SHORT CODES ONLY (typically 2-4 upperc
 Do NOT include descriptive names in the code fields. Example: return "DAC" not "DAC (DATA CONVERTER)".
 The descriptive names (CATE_M_NAME, CATE_S_NAME) go in their own separate fields.
 
+{ITEM_DESC_PREFIX_GUIDE}
+
 Rules:
+- Use the Item_Desc prefix guide above to identify the component type FIRST, then select the best matching candidate.
+- If the prefix clearly indicates a component type, prefer candidates that match that type even if vector similarity is slightly lower.
 - Always respond in valid JSON only, no markdown, no explanation outside the JSON.
 - You MUST pick one of the provided candidate categories. Do not invent new codes.
 - Consider the component's description and the first GPT analysis reason when choosing.
-- JSON format: {"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "CATE_M_NAME": "...", "CATE_S_NAME": "...", "confidence": "high|medium|low", "reason": "..."}
+- JSON format: {{"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "CATE_M_NAME": "...", "CATE_S_NAME": "...", "confidence": "high|medium|low", "reason": "..."}}
 """
 
 

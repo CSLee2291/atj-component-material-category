@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     denodo_enabled: bool = True
 
     # Power BI / Analysis Services (fallback)
-    pbi_connection_string: str = "Data Source=localhost:52635;Application Name=MCP-PBIModeling"
+    pbi_enabled: bool = True  # Set to false to disable PBI fallback entirely
+    pbi_connection_string: str = "Data Source=localhost:52635;Application Name=MCP-PBIAbout"
     pbi_connection_name: str = "PBIDesktop-2026_plm_alparts-52635"
 
     # Azure OpenAI

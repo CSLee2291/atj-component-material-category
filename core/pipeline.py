@@ -47,7 +47,10 @@ async def process_single_item(
     item_no = target_row["Item_Number"]
 
     # Get manufacturer info (take first row if 1:many)
-    mfr_rows = mfr_df[mfr_df["Item_Number"] == item_no]
+    if mfr_df.empty or "Item_Number" not in mfr_df.columns:
+        mfr_rows = pd.DataFrame()
+    else:
+        mfr_rows = mfr_df[mfr_df["Item_Number"] == item_no]
     if mfr_rows.empty:
         mfr_name = ""
         mpn = ""
