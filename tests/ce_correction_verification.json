@@ -1,0 +1,156 @@
+{
+  "_description": "CE-validated correction test cases. Run these after any modification to core/gpt_caller.py or core/fuzzy_matcher.py to verify AI categorization accuracy.",
+  "_usage": "POST /api/lookup/run with item_numbers list, then compare AI_MATERIAL_CATEGORY against expected_category.",
+  "test_cases": [
+    {
+      "item_number": "14TJ2190654-3",
+      "item_desc": "(DEL26)@PER SCH3114I-NU MICROCHIP@LPCIO 8BIT Q",
+      "mpn": "SCH3114I-NU",
+      "prefix": "@PER",
+      "component_type": "Super I/O Controller",
+      "expected_category": "SIO|SIOX",
+      "wrong_ai_category": "CPU|MCUX",
+      "correction_rule": "@PER + Super I/O (LPCIO) -> SIO|SIOX, not CPU/MCU"
+    },
+    {
+      "item_number": "14TJ2151279-0",
+      "item_desc": "@LIN LMC6772AIMM/NOPB TI S@CMOS 100DB 2",
+      "mpn": "LMC6772AIMM/NOPB",
+      "prefix": "@LIN",
+      "component_type": "Dual CMOS Op-Amp",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@LIN + OpAmp -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ2151309-6",
+      "item_desc": "@LIN LMV7239M7/NOPB TI SVA@1 TAP-CP",
+      "mpn": "LMV7239M7/NOPB",
+      "prefix": "@LIN",
+      "component_type": "Comparator",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "LOG|COMR",
+      "correction_rule": "@LIN + Comparator -> DAC|AMPX (not LOG|COMR)"
+    },
+    {
+      "item_number": "14TJ2151312-6",
+      "item_desc": "@LIN LMV824MTX/NOPB TI SVA@CMOS 105DB 4",
+      "mpn": "LMV824MTX/NOPB",
+      "prefix": "@LIN",
+      "component_type": "Quad CMOS Op-Amp",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "DAC|LEVL",
+      "correction_rule": "@LIN + OpAmp -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ2151313-4",
+      "item_desc": "@LIN LMV751M5/NOPB TI SVA@1 TAP-CP",
+      "mpn": "LMV751M5/NOPB",
+      "prefix": "@LIN",
+      "component_type": "Op-Amp",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@LIN + OpAmp -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ2611386-0",
+      "item_desc": "@CPU,DSP TMS320C6746EZWT4@64 FLOAT 3648",
+      "mpn": "TMS320C6746EZWT4",
+      "prefix": "@CPU,DSP",
+      "component_type": "Digital Signal Processor",
+      "expected_category": "DSP|DSPX",
+      "wrong_ai_category": "CPU|DSPX",
+      "correction_rule": "@CPU,DSP + TMS320 DSP -> DSP|DSPX (not CPU|DSPX)"
+    },
+    {
+      "item_number": "14TJ2613771-8",
+      "item_desc": "@LIN TLV1704AIPWR TI@4 TAP-SO",
+      "mpn": "TLV1704AIPWR",
+      "prefix": "@LIN",
+      "component_type": "Quad Comparator",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "PWR|DETC",
+      "correction_rule": "@LIN + Comparator -> DAC|AMPX (not PWR|DETC)"
+    },
+    {
+      "item_number": "14TJ2811406-5",
+      "item_desc": "@LIN OPA4197IDR TI@BIPOLAR 120DB 4 TAP-",
+      "mpn": "OPA4197IDR",
+      "prefix": "@LIN",
+      "component_type": "Quad Bipolar Op-Amp",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "PWR|DETC",
+      "correction_rule": "@LIN + OpAmp (OPA) -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ2814428-2",
+      "item_desc": "@LIN DG9431EDV-T1-GE3 VISH@ANALOG SW TA",
+      "mpn": "DG9431EDV-T1-GE3",
+      "prefix": "@LIN",
+      "component_type": "Analog Switch",
+      "expected_category": "DAC|MUXX",
+      "wrong_ai_category": "SWX|DETE",
+      "correction_rule": "@LIN + Analog Switch -> DAC|MUXX (not SWX|DETE)"
+    },
+    {
+      "item_number": "14TJ3013414-6",
+      "item_desc": "@LIN LM6172IMX/NOPB TI SVA@BIPOLAR 70DB",
+      "mpn": "LM6172IMX/NOPB",
+      "prefix": "@LIN",
+      "component_type": "Dual High-Speed Op-Amp",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@LIN + OpAmp -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ3038483-5",
+      "item_desc": "@LIN SN65LVDS387DGGR TI@OTHER DRV.16RCV",
+      "mpn": "SN65LVDS387DGGR",
+      "prefix": "@LIN",
+      "component_type": "LVDS Line Driver/Receiver",
+      "expected_category": "VDO|LVDS",
+      "wrong_ai_category": "DIS|LVDS",
+      "correction_rule": "@LIN + LVDS -> VDO|LVDS (not DIS|LVDS)"
+    },
+    {
+      "item_number": "14TJ3058752-3",
+      "item_desc": "@LIN LMV331M7/NOPB TI SVA@1 TAP-CP",
+      "mpn": "LMV331M7/NOPB",
+      "prefix": "@LIN",
+      "component_type": "Low-Voltage Comparator",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "PWR|DETC",
+      "correction_rule": "@LIN + Comparator -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ3098456-5",
+      "item_desc": "@LIN TS5A3159ADBVR TI@ANALOG SW TAP-CP",
+      "mpn": "TS5A3159ADBVR",
+      "prefix": "@LIN",
+      "component_type": "Analog Switch/MUX",
+      "expected_category": "DAC|MUXX",
+      "wrong_ai_category": "TYC|MUXX",
+      "correction_rule": "@LIN + Analog Switch/MUX -> DAC|MUXX (not TYC|MUXX)"
+    },
+    {
+      "item_number": "14TJ3286683-7",
+      "item_desc": "@CPU,DSP TMS320C6657CZH8 T@32 FLOAT+FIX",
+      "mpn": "TMS320C6657CZH8",
+      "prefix": "@CPU,DSP",
+      "component_type": "Digital Signal Processor",
+      "expected_category": "DSP|DSPX",
+      "wrong_ai_category": "CPU|DSPX",
+      "correction_rule": "@CPU,DSP + TMS320 DSP -> DSP|DSPX"
+    },
+    {
+      "item_number": "14TJ3286684-5",
+      "item_desc": "@LIN TLV274IDR TI@CMOS 106DB 4 TAP-SO",
+      "mpn": "TLV274IDR",
+      "prefix": "@LIN",
+      "component_type": "Quad CMOS Op-Amp",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "LOG|COMR",
+      "correction_rule": "@LIN + OpAmp (TLV274) -> DAC|AMPX (not LOG|COMR)"
+    }
+  ]
+}

@@ -49,7 +49,16 @@ The @PREFIX at the start of Item_Desc encodes the component type. Use this to de
 @C        → Capacitor (check suffix: MLCC ceramic, electrolytic aluminum, electrolytic polymer, tantalum, film, super/EDLC)
 @CN       → Connector (check suffix: board-to-board, FFC/FPC, pin header, socket, terminal block, D-Sub, USB, RJ45, M.2, PCIe, SATA, SIM, SD, power)
 @TR       → Transistor (check suffix: MOSFET, BJT, IGBT, JFET, darlington)
-@LIN      → Linear IC (check suffix: OpAmp, voltage regulator LDO, voltage reference, comparator, analog switch/MUX, current sense amp, instrumentation amp, power management PMIC)
+@LIN      → Linear IC — this is a broad category covering many analog IC sub-types. Use the sub-type rules below:
+              Sub-type: OpAmp / Operational Amplifier (OPA, LMV, LMC, TLV27x, LM6xxx, AD8xxx, MCP60x) → DAC|AMPX
+              Sub-type: Comparator (LMV331, LMV7239, TLV1704, LM339, LM393, MAX9xx) → DAC|AMPX  (Note: Advantech classifies comparators under DAC|AMPX, same as op-amps)
+              Sub-type: Analog Switch / Multiplexer (DG94xx, TS5A, ADG7xx, MAX48xx, FSA, SN74CBT) → DAC|MUXX
+              Sub-type: LVDS Driver/Receiver (SN65LVDS, DS90LV, MAX9xxx LVDS) → VDO|LVDS
+              Sub-type: Voltage Regulator LDO → LDO category
+              Sub-type: Voltage Reference → voltage reference category
+              Sub-type: Current Sense Amplifier → current sense category
+              Sub-type: Instrumentation Amplifier → DAC|AMPX
+              Sub-type: Power Management PMIC → PMIC category
 @LOG      → Logic IC (check suffix: buffer, gate AND/OR/NAND/NOR/XOR, flip-flop, latch, shift register, counter, level translator, bus transceiver)
 @D        → Diode (check suffix: rectifier, Schottky, Zener, TVS, signal, fast recovery, bridge rectifier, LED)
 @SA       → Surge Absorber / TVS array / ESD protector
@@ -64,9 +73,11 @@ The @PREFIX at the start of Item_Desc encodes the component type. Use this to de
 @LED      → LED (check suffix: standard, high-power, SMD, through-hole, IR, UV). Category: LED|LEDS for SMD/surface-mount, LED|LEDD for DIP/through-hole
 @PH       → Photo device (check suffix: phototransistor, photodiode, photo interrupter, optocoupler, photo IC)
 @PHT      → LED display / LED indicator component — includes LED digit display (7-segment, numeric, alphanumeric), LED dot matrix, LED bar graph, LED light pipe, single LED. Category: LED|LEDS for SMD/surface-mount, LED|LEDD for DIP/through-hole. Example: "@PHT LF-3011MA ﾛ-ﾑ@GRN" = ROHM LF-3011MA SMD 1-digit LED display → LED|LEDS
+@PER      → Peripheral IC / Super I/O controller (e.g., SCH3114, SCH3227, W83627, IT8728, F81866) → SIO|SIOX. Note: LPCIO / Super I/O chips are NOT MCU/CPU — they are SIO category.
 @IC       → IC general (check suffix: microcontroller MCU, interface UART/SPI/I2C/Ethernet/CAN/RS-232/RS-485, timer, RTC, EEPROM, watchdog, motor driver, audio codec)
 @FPGA     → FPGA / CPLD
-@DSP      → Digital Signal Processor
+@CPU,DSP  → Combined CPU/DSP prefix — if the part is a Digital Signal Processor (TMS320, ADSP, SHARC), use DSP|DSPX (NOT CPU|DSPX)
+@DSP      → Digital Signal Processor → DSP|DSPX (NOT CPU|DSPX — DSP uses the DSP major category, not CPU)
 @ADC      → A/D Converter IC
 @DAC      → D/A Converter IC
 @CODEC    → Audio/Video Codec
@@ -102,6 +113,37 @@ For individual LED components (including LED displays, 7-segment, dot matrix, LE
   - SMD / surface-mount package → LED|LEDS
   - DIP / through-hole package → LED|LEDD
 Package clues: "SMD", "SMT", "CHIP", "SOJ", "SOP" = surface-mount → LEDS. "DIP", "THT", "THRU-HOLE", "AR" (axial/radial) = through-hole → LEDD.
+
+--- CE-Validated Correction Examples (use these as ground truth) ---
+The following are real items that were incorrectly categorized and corrected by Component Engineering (CE).
+Use these examples to learn the correct mapping patterns:
+
+@LIN + OpAmp/Amplifier → DAC|AMPX:
+  "@LIN LMC6772AIMM/NOPB TI" (dual CMOS op amp) → DAC|AMPX (NOT IC|BGA IC)
+  "@LIN LMV824MTX/NOPB TI" (quad CMOS op amp) → DAC|AMPX (NOT DAC|LEVL)
+  "@LIN LMV751M5/NOPB TI" (op amp) → DAC|AMPX (NOT IC|BGA IC)
+  "@LIN OPA4197IDR TI" (quad bipolar op amp) → DAC|AMPX (NOT PWR|DETC)
+  "@LIN LM6172IMX/NOPB TI" (dual high-speed op amp) → DAC|AMPX (NOT IC|BGA IC)
+  "@LIN TLV274IDR TI" (quad CMOS op amp) → DAC|AMPX (NOT LOG|COMR)
+
+@LIN + Comparator → DAC|AMPX:
+  "@LIN LMV7239M7/NOPB TI" (comparator) → DAC|AMPX (NOT LOG|COMR)
+  "@LIN TLV1704AIPWR TI" (quad comparator) → DAC|AMPX (NOT PWR|DETC)
+  "@LIN LMV331M7/NOPB TI" (low-voltage comparator) → DAC|AMPX (NOT PWR|DETC)
+
+@LIN + Analog Switch/MUX → DAC|MUXX:
+  "@LIN DG9431EDV-T1-GE3 VISH" (analog switch) → DAC|MUXX (NOT SWX|DETE)
+  "@LIN TS5A3159ADBVR TI" (analog switch/MUX) → DAC|MUXX (NOT TYC|MUXX)
+
+@LIN + LVDS → VDO|LVDS:
+  "@LIN SN65LVDS387DGGR TI" (LVDS line driver) → VDO|LVDS (NOT DIS|LVDS)
+
+@CPU,DSP + DSP → DSP|DSPX:
+  "@CPU,DSP TMS320C6746EZWT4" (TI DSP) → DSP|DSPX (NOT CPU|DSPX)
+  "@CPU,DSP TMS320C6657CZH8 T" (TI DSP) → DSP|DSPX (NOT CPU|DSPX)
+
+@PER + Super I/O → SIO|SIOX:
+  "(DEL26)@PER SCH3114I-NU MICROCHIP" (LPC Super I/O) → SIO|SIOX (NOT CPU|MCUX)
 
 --- Special Keyword Fallback ---
 When the prefix is ambiguous or absent, look for these keywords ANYWHERE in Item_Desc or MFR_PART_NUMBER:
