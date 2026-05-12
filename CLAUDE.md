@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # ATJ-Component MATERIAL_CATEGORY Auto-Categorization System
 
 ## Project Overview
@@ -15,7 +19,7 @@ python main.py                  # -> http://localhost:8000
 ### Prerequisites
 
 - **`.env`** must have valid Azure OpenAI credentials and Denodo credentials (see `.env` section below)
-- **Denodo REST API** (primary data source) must be reachable at `acldtpltfrm-dev:9443`
+- **Denodo REST API** (primary data source) must be reachable at `dataplatform.advantech.com.tw:9443` (production)
 - **Power BI Desktop** with `2026_plm_alparts.pbix` loaded (fallback only, needed when Denodo is down)
 
 ## Project Structure
@@ -45,8 +49,10 @@ atj-component-material-category/
 │   ├── lookup.html             # Manual lookup page with sorting/filtering
 │   └── kpi.html                # KPI dashboard (All ATJ + Phase I tracking)
 ├── tests/
-│   ├── test_items.json         # 4 standard test items for algorithm validation
-│   └── run_test_batch.py       # Smoke test script
+│   ├── test_items.json                 # 4 standard test items for algorithm validation
+│   ├── run_test_batch.py               # Smoke test script
+│   ├── run_ce_verification.py          # Runs CE-validated correction rule suite
+│   └── ce_correction_verification.json # Expected categories for CE correction cases
 └── data/
     ├── cache/                  # Parquet caches + vector DB files
     │   ├── atj_targets.parquet
@@ -66,7 +72,7 @@ atj-component-material-category/
 ### Denodo REST API (primary)
 
 Two Denodo web services provide the data:
-- **`iv_allparts_info_for_ce`** -- item info, lifecycle, material category, category codes
+- **`iv_plm_allparts_info_latest`** (exposed by `ws_plm_allparts_info_latest_ce_app`) -- item info, lifecycle, material category, category codes
 - **`iv_plm_zagile_manufacture`** -- manufacturer names and MPN (part numbers)
 
 `core/denodo_client.py` handles HTTP Basic auth, auto-pagination (`$start_index` + `$count`), and column normalization (`ITEM_NUMBER` -> `Item_Number`).
@@ -90,6 +96,13 @@ Additional functions for KPI:
 
 The vector DB contains ~983 distinct `ZZMCATG_M|ZZMCATG_S` pairs embedded with Azure OpenAI `text-embedding-3-small`. Top-10 candidates generally outperform top-5.
 
+## Architecture: GPT Prompt Hardening
+
+Two layers of guardrails sit inside `core/gpt_caller.py` on top of the 2-pass flow:
+
+- **MATERIAL_CATEGORY whitelist** -- both passes are constrained to return only category codes that exist in the reference pool / vector-DB candidate list. After the GPT response is parsed, `_clean_category_code()` strips any descriptive suffix (e.g. `"DAC (DATA CONVERTER)"` -> `"DAC"`) and the result is re-validated against the allowed set. Off-list outputs force a fallback / low confidence.
+- **CE-validated correction rules** -- a set of hand-curated disambiguation rules (e.g. CPLD vs. FPGA, DAC vs. ADC, connector vs. cable subfamilies) is injected into the prompt as a prefix guide. The regression harness `tests/run_ce_verification.py` replays the `tests/ce_correction_verification.json` cases against the live server to confirm these corrections still hold after prompt or pipeline edits.
+
 ## Key Design Decisions
 
 - **Denodo-first, PBI-fallback** -- Denodo REST API is the primary data source; PBI Desktop is kept as fallback
@@ -98,6 +111,7 @@ The vector DB contains ~983 distinct `ZZMCATG_M|ZZMCATG_S` pairs embedded with A
 - **Parquet caching** -- full target list (~80K items), reference pool, and category vectors cached to `data/cache/`
 - **2-pass GPT** -- vector DB fallback dramatically improves accuracy for items with weak fuzzy matches
 - **GPT output cleanup** -- `_clean_category_code()` strips descriptive names GPT sometimes appends (e.g. `"DAC (DATA CONVERTER)"` -> `"DAC"`)
+- **Whitelist enforcement** -- GPT output is hard-checked against the reference/vector candidate set; off-list predictions are rejected
 - **Python-side join** for reference pool -- avoids DAX `NATURALLEFTOUTERJOIN` lineage conflicts
 
 ## API Endpoints
@@ -185,12 +199,26 @@ curl -X POST http://localhost:8000/api/phase1/batch/run \
   -d '{"offset": 0, "limit": 100, "vector_top_k": 10}'
 ```
 
+### Re-run AI on existing Phase I results
+Two standalone scripts (require the FastAPI server running on port 8000) drive large re-runs against the Phase I Excel and write results into `*_v2` columns:
+
+- `python run_medium_rerun.py` -- re-runs items currently at `AI_CONFIDENCE == "medium"`, 200-item batches, 30s cooldown
+- `python run_blank_rerun.py` -- re-runs items at blank `AI_CONFIDENCE`, skipping Material numbers starting with `142`
+
+Both scripts call `/api/lookup/run`, poll `/api/batch/{id}/status`, and merge results back into `Phase_I_PUR_2024_2025.xlsx`.
+
+### Run CE correction verification suite
+```bash
+python tests/run_ce_verification.py
+```
+Replays `tests/ce_correction_verification.json` against the running server; each case asserts an expected category (regression guard for CE-validated correction rules).
+
 ## `.env` Configuration
 
 ```ini
-# Denodo REST API (primary data source)
-DENODO_BASE_URL_ALLPARTS=https://acldtpltfrm-dev:9443/server/dx_ce/ws_allparts_info_for_ce_app
-DENODO_BASE_URL_MANUFACTURE=https://acldtpltfrm-dev:9443/server/dx_ce/iv_plm_zagile_manufacture_ce_app
+# Denodo REST API (primary data source, production)
+DENODO_BASE_URL_ALLPARTS=https://dataplatform.advantech.com.tw:9443/server/dx_ce/ws_plm_allparts_info_latest_ce_app
+DENODO_BASE_URL_MANUFACTURE=https://dataplatform.advantech.com.tw:9443/server/dx_ce/iv_plm_zagile_manufacture_ce_app
 DENODO_USERNAME=ce_app
 DENODO_PASSWORD=<secret>
 DENODO_ENABLED=true

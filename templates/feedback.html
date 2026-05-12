@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATJ Category Updater - CE Feedback</title>
+<style>
+  :root, [data-theme="dark"] {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2a2d3a;
+    --accent: #4f8ef7; --accent2: #22d3a8; --warn: #f59e0b;
+    --danger: #ef4444; --success: #22c55e;
+    --text: #e2e8f0; --muted: #64748b;
+    --th-bg: #1e2030;
+    --hover-row: rgba(79,142,247,0.05);
+    --code-bg: #0b0d14;
+    --toggle-bg: var(--surface); --toggle-border: var(--border);
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
+    --sans: 'Inter', system-ui, sans-serif;
+  }
+  [data-theme="light"] {
+    --bg: #f5f7fa; --surface: #ffffff; --border: #d1d5db;
+    --accent: #2563eb; --accent2: #059669; --warn: #d97706;
+    --danger: #dc2626; --success: #16a34a;
+    --text: #1e293b; --muted: #6b7280;
+    --th-bg: #e5e7eb;
+    --hover-row: rgba(37,99,235,0.05);
+    --code-bg: #f3f4f6;
+    --toggle-bg: var(--surface); --toggle-border: var(--border);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; }
+
+  header { border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.1rem; font-weight: 600; }
+  .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; background: var(--accent); color: #fff; font-weight: 600; }
+
+  .theme-toggle { margin-left: auto; display: flex; align-items: center; gap: 6px; background: var(--toggle-bg); border: 1px solid var(--toggle-border); border-radius: 99px; padding: 3px 4px; cursor: pointer; user-select: none; }
+  .theme-toggle-option { font-size: 0.72rem; font-weight: 600; padding: 4px 12px; border-radius: 99px; transition: all .2s; color: var(--muted); }
+  .theme-toggle-option.active { background: var(--accent); color: #fff; }
+
+  nav { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  nav a { padding: 0.7rem 1.5rem; font-size: 0.85rem; font-weight: 500; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
+  nav a:hover { color: var(--text); }
+  nav a.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { padding: 1.5rem 2rem; display: flex; flex-direction: column; gap: 1.25rem; }
+  section.panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.5rem; }
+  section.panel h2 { font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.85rem; }
+
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+  select, input[type=text], input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 7px 10px; font-size: 0.85rem; font-family: var(--mono); }
+
+  .controls-row { display: flex; gap: 1rem; align-items: end; flex-wrap: wrap; }
+  .controls-row > * { min-width: 200px; }
+  .controls-row label { white-space: nowrap; }
+
+  .radio-group { display: flex; gap: 12px; }
+  .radio-group label { display: flex; align-items: center; gap: 6px; margin: 0; cursor: pointer; color: var(--text); font-size: 0.85rem; }
+
+  .btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; background: var(--accent); color: #fff; font-weight: 600; font-size: 0.85rem; transition: opacity .15s; }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.secondary { background: var(--surface); border: 1px solid var(--border); color: var(--text); }
+  .btn.success { background: var(--success); color: #08130a; }
+  .btn.danger { background: var(--danger); }
+
+  .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+  .stat-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem 1rem; }
+  .stat-card .label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-card .value { font-size: 1.4rem; font-weight: 700; margin-top: 4px; }
+  .stat-card .value.good { color: var(--success); }
+  .stat-card .value.warn { color: var(--warn); }
+  .stat-card .value.bad { color: var(--danger); }
+
+  table.groups { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  table.groups th, table.groups td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  table.groups th { background: var(--th-bg); font-weight: 600; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.groups td.cat { font-family: var(--mono); }
+  table.groups tr:hover td { background: var(--hover-row); }
+  td.ai { color: var(--danger); }
+  td.ce { color: var(--success); }
+  td.count { text-align: right; font-weight: 600; font-family: var(--mono); }
+
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-family: var(--mono); font-size: 0.78rem; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 400px; }
+
+  .section-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+  .section-tab { padding: 5px 12px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); font-size: 0.74rem; cursor: pointer; color: var(--muted); font-family: var(--mono); }
+  .section-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .deploy-gate { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); margin-top: 12px; font-size: 0.85rem; }
+  .deploy-gate.ok { border-color: var(--success); }
+  .deploy-gate.fail { border-color: var(--danger); }
+  .deploy-gate .icon { font-size: 1.2rem; }
+
+  .help { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
+
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); user-select: none; padding: 4px 0; }
+  details[open] summary { color: var(--text); }
+
+  .empty { text-align: center; padding: 2rem; color: var(--muted); font-size: 0.85rem; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <h1>ATJ Category Updater</h1>
+  <span class="badge" id="env-badge">DEV</span>
+  <div class="theme-toggle" id="theme-toggle" style="margin-left:auto">
+    <span class="theme-toggle-option" data-theme="light">Light</span>
+    <span class="theme-toggle-option active" data-theme="dark">Dark</span>
+  </div>
+</header>
+
+<nav>
+  <a href="/">Batch Process</a>
+  <a href="/lookup">Manual Lookup</a>
+  <a href="/kpi">KPI Dashboard</a>
+  <a href="/feedback" class="active">CE Feedback</a>
+</nav>
+
+<main>
+
+  <!-- Step 1: Upload -->
+  <section class="panel">
+    <h2>1. Upload CE Feedback Excel</h2>
+    <div class="controls-row">
+      <div>
+        <label>LLM provider whose prompt to update</label>
+        <div class="radio-group" id="provider-radio">
+          <label><input type="radio" name="provider" value="azure" checked> Azure OpenAI</label>
+          <label><input type="radio" name="provider" value="gemini"> Gemini (Vertex AI)</label>
+        </div>
+      </div>
+      <div style="flex:1">
+        <label>Excel file (.xlsx)</label>
+        <input type="file" id="file-input" accept=".xlsx">
+      </div>
+      <button class="btn" id="upload-btn" onclick="uploadFile()">Upload &amp; Analyze</button>
+    </div>
+    <div class="help">
+      Required columns: <strong>Material</strong>, <strong>AI_MATERIAL_CATEGORY</strong> (or <strong>AI_MATERIAL_CATEGORY_v2</strong>),
+      <strong>CE_MATERIAL_CATEGORY</strong>. Optional: Item_Desc / Material Number, MPN, CE_comment.
+      Each row where <em>AI ≠ CE</em> becomes a new CE-validated example appended to the selected provider's prompt.
+    </div>
+    <div id="upload-status" style="display:none;margin-top:8px"></div>
+  </section>
+
+  <!-- Step 2: Proposal preview -->
+  <section class="panel" id="proposal-panel" style="display:none">
+    <h2>2. Proposed Prompt Update</h2>
+    <div class="stats-row" id="proposal-stats"></div>
+
+    <div style="margin-bottom: 12px;">
+      <strong style="font-size:0.85rem">Top correction patterns</strong>
+    </div>
+    <table class="groups" id="groups-table">
+      <thead><tr><th>Prefix</th><th>AI predicted</th><th>CE corrected</th><th class="count">Items</th><th>Sample</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <details>
+      <summary>Show generated appendix (will be inserted into <code>CE_EXAMPLES</code> section of <span id="next-version">vN</span>)</summary>
+      <pre id="appendix-text"></pre>
+    </details>
+  </section>
+
+  <!-- Step 3: Test -->
+  <section class="panel" id="test-panel" style="display:none">
+    <h2>3. Test Before Deploy</h2>
+    <div class="controls-row">
+      <div>
+        <label>Sample size from uploaded items</label>
+        <input type="number" id="sample-limit" value="30" min="1" max="200">
+      </div>
+      <button class="btn" id="test-btn" onclick="runTest()">Run Test</button>
+    </div>
+    <div class="help">
+      Two checks run with the proposed prompt temporarily activated, then reverted automatically:
+      <strong>(a)</strong> re-categorize a sample of the uploaded items; <strong>(b)</strong> the regression set
+      <code>tests/ce_correction_verification.json</code>. Deploy unlocks when (a) ≥ 80% AND (b) ≥ 95%.
+    </div>
+    <div id="test-status" style="display:none;margin-top:12px"></div>
+    <div id="test-results" style="display:none;margin-top:12px"></div>
+  </section>
+
+  <!-- Step 4: Deploy -->
+  <section class="panel" id="deploy-panel" style="display:none">
+    <h2>4. Deploy</h2>
+    <div class="deploy-gate" id="deploy-gate">
+      <span class="icon">⏸</span>
+      <span id="deploy-msg">Run the test first to enable deploy.</span>
+    </div>
+    <button class="btn success" id="deploy-btn" onclick="deploy()" disabled style="margin-top:12px">Deploy as <span id="deploy-version-label">vN</span></button>
+    <div id="deploy-status" style="margin-top:8px"></div>
+  </section>
+
+  <!-- Always-on: Prompt preview -->
+  <section class="panel">
+    <h2>Active Prompt Preview</h2>
+    <div class="controls-row" style="margin-bottom:12px">
+      <div>
+        <label>Provider</label>
+        <select id="preview-provider" onchange="loadPreview()">
+          <option value="azure">Azure OpenAI</option>
+          <option value="gemini">Gemini (Vertex AI)</option>
+        </select>
+      </div>
+      <div>
+        <label>Version</label>
+        <select id="preview-version" onchange="loadPreview()"></select>
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button class="btn secondary" onclick="rollback()">Activate this version</button>
+      </div>
+      <div style="flex:1; text-align: right">
+        <label>&nbsp;</label>
+        <span class="help">Active version: <strong id="preview-active">—</strong></span>
+      </div>
+    </div>
+
+    <div class="section-tabs" id="section-tabs"></div>
+    <pre id="section-body"></pre>
+  </section>
+
+</main>
+
+<script>
+const API = '';
+let currentProposal = null;
+let currentSections = null;
+let currentSectionName = null;
+
+// ===== Theme =====
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('atj-theme', t);
+  document.querySelectorAll('.theme-toggle-option').forEach(el => el.classList.toggle('active', el.dataset.theme === t));
+}
+document.getElementById('theme-toggle').addEventListener('click', e => {
+  const o = e.target.closest('.theme-toggle-option');
+  if (o) setTheme(o.dataset.theme);
+});
+setTheme(localStorage.getItem('atj-theme') || 'dark');
+
+async function loadEnv() {
+  try {
+    const r = await fetch(`${API}/api/config`);
+    const c = await r.json();
+    if (c.env === 'prod') {
+      const b = document.getElementById('env-badge');
+      b.textContent = 'PROD'; b.style.background = 'var(--warn)'; b.style.color = '#000';
+    }
+  } catch(e){}
+}
+loadEnv();
+
+// ===== Upload =====
+async function uploadFile() {
+  const f = document.getElementById('file-input').files[0];
+  if (!f) { alert('Pick an .xlsx file first.'); return; }
+  const provider = document.querySelector('input[name=provider]:checked').value;
+  const fd = new FormData();
+  fd.append('provider', provider);
+  fd.append('file', f);
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true; btn.textContent = 'Uploading...';
+  const status = document.getElementById('upload-status');
+  status.style.display = 'block';
+  status.innerHTML = `<span style="color:var(--muted);font-size:0.8rem">Parsing ${f.name}...</span>`;
+  try {
+    const r = await fetch(`${API}/api/feedback/upload`, { method: 'POST', body: fd });
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const p = await r.json();
+    currentProposal = p;
+    renderProposal(p);
+    status.innerHTML = `<span style="color:var(--success);font-size:0.8rem">Parsed: ${p.rows_total} rows, ${p.rows_mismatch} disagreements (${p.pattern_groups.length} unique patterns)</span>`;
+  } catch(e) {
+    status.innerHTML = `<span style="color:var(--danger);font-size:0.8rem">Error: ${e.message}</span>`;
+  }
+  btn.disabled = false; btn.textContent = 'Upload & Analyze';
+}
+
+function renderProposal(p) {
+  document.getElementById('proposal-panel').style.display = 'block';
+  document.getElementById('test-panel').style.display = 'block';
+  document.getElementById('deploy-panel').style.display = 'block';
+  document.getElementById('next-version').textContent = p.next_version;
+  document.getElementById('deploy-version-label').textContent = p.next_version;
+
+  const stats = document.getElementById('proposal-stats');
+  stats.innerHTML = `
+    <div class="stat-card"><div class="label">Provider</div><div class="value">${p.provider}</div></div>
+    <div class="stat-card"><div class="label">Base → Next version</div><div class="value">${p.base_version} → ${p.next_version}</div></div>
+    <div class="stat-card"><div class="label">Rows uploaded</div><div class="value">${p.rows_total}</div></div>
+    <div class="stat-card"><div class="label">AI ≠ CE</div><div class="value warn">${p.rows_mismatch}</div></div>
+    <div class="stat-card"><div class="label">Unique patterns</div><div class="value">${p.pattern_groups.length}</div></div>`;
+
+  const tbody = document.querySelector('#groups-table tbody');
+  tbody.innerHTML = '';
+  p.pattern_groups.slice(0, 30).forEach(g => {
+    const sample = g.samples[0] || {};
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="cat">${g.prefix || '—'}</td>
+      <td class="cat ai">${g.ai}</td>
+      <td class="cat ce">${g.ce}</td>
+      <td class="count">${g.count}</td>
+      <td style="font-family:var(--mono);font-size:0.74rem;color:var(--muted)">${(sample.desc || sample.mpn || sample.item || '').slice(0, 80)}</td>`;
+    tbody.appendChild(tr);
+  });
+  if (p.pattern_groups.length > 30) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="5" style="text-align:center;color:var(--muted)">…and ${p.pattern_groups.length - 30} more pattern groups</td>`;
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('appendix-text').textContent = p.appendix_text;
+
+  // Reset deploy gate
+  document.getElementById('deploy-btn').disabled = true;
+  document.getElementById('deploy-status').textContent = '';
+  document.getElementById('test-results').style.display = 'none';
+  document.getElementById('test-status').style.display = 'none';
+  setDeployGate(null);
+}
+
+// ===== Test =====
+async function runTest() {
+  if (!currentProposal) return;
+  const limit = parseInt(document.getElementById('sample-limit').value) || 30;
+  const btn = document.getElementById('test-btn');
+  btn.disabled = true; btn.textContent = 'Running…';
+  const status = document.getElementById('test-status');
+  status.style.display = 'block';
+  status.innerHTML = `<span style="color:var(--muted);font-size:0.8rem">Re-running ${limit} uploaded items + regression set with proposed prompt. This may take 30-60s.</span>`;
+  try {
+    const r = await fetch(`${API}/api/feedback/test/${currentProposal.proposal_id}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ sample_limit: limit })
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const res = await r.json();
+    renderTestResults(res);
+    status.style.display = 'none';
+  } catch(e) {
+    status.innerHTML = `<span style="color:var(--danger);font-size:0.8rem">Error: ${e.message}</span>`;
+  }
+  btn.disabled = false; btn.textContent = 'Run Test';
+}
+
+function renderTestResults(res) {
+  const el = document.getElementById('test-results');
+  el.style.display = 'block';
+  const ui = res.uploaded_items;
+  const rg = res.regression;
+  const uiClass = ui.pct >= 80 ? 'good' : (ui.pct >= 60 ? 'warn' : 'bad');
+  const rgClass = rg.pct >= 95 ? 'good' : (rg.pct >= 80 ? 'warn' : 'bad');
+  el.innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="label">(a) Uploaded items</div>
+        <div class="value ${uiClass}">${ui.correct}/${ui.total} = ${ui.pct}%</div>
+        <div class="help">sampled ${ui.sampled} / ${currentProposal.sample_items.length} mismatches</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">(b) Regression set</div>
+        <div class="value ${rgClass}">${rg.correct}/${rg.total} = ${rg.pct}%</div>
+        <div class="help">tests/ce_correction_verification.json</div>
+      </div>
+    </div>
+    <details>
+      <summary>Per-item results (uploaded sample)</summary>
+      <pre>${JSON.stringify(ui.details, null, 2)}</pre>
+    </details>
+    <details>
+      <summary>Per-item results (regression)</summary>
+      <pre>${JSON.stringify(rg.details, null, 2)}</pre>
+    </details>`;
+
+  // Decide deploy gate (a >= 80, b >= 95)
+  const passA = ui.total === 0 || ui.pct >= 80;
+  const passB = rg.total === 0 || rg.pct >= 95;
+  const passed = passA && passB;
+  setDeployGate(passed ? 'ok' : 'fail', passA, passB, ui, rg);
+  document.getElementById('deploy-btn').disabled = !passed;
+}
+
+function setDeployGate(state, passA, passB, ui, rg) {
+  const el = document.getElementById('deploy-gate');
+  const msg = document.getElementById('deploy-msg');
+  el.classList.remove('ok', 'fail');
+  if (state === null) { el.querySelector('.icon').textContent = '⏸'; msg.textContent = 'Run the test first to enable deploy.'; return; }
+  if (state === 'ok') {
+    el.classList.add('ok');
+    el.querySelector('.icon').textContent = '✓';
+    msg.innerHTML = `Both gates passed (uploaded ${ui.pct}% ≥ 80%, regression ${rg.pct}% ≥ 95%). Deploy is unlocked.`;
+  } else {
+    el.classList.add('fail');
+    el.querySelector('.icon').textContent = '✗';
+    msg.innerHTML = `Gate failed — uploaded ${ui.pct}% (need ≥80%, ${passA?'OK':'FAIL'}), regression ${rg.pct}% (need ≥95%, ${passB?'OK':'FAIL'}). Inspect appendix and re-upload after manual edits.`;
+  }
+}
+
+// ===== Deploy =====
+async function deploy() {
+  if (!currentProposal) return;
+  const btn = document.getElementById('deploy-btn');
+  btn.disabled = true; btn.textContent = 'Deploying…';
+  const status = document.getElementById('deploy-status');
+  status.innerHTML = '<span style="color:var(--muted);font-size:0.8rem">Writing version file and bumping current.json…</span>';
+  try {
+    const r = await fetch(`${API}/api/feedback/deploy/${currentProposal.proposal_id}`, { method: 'POST' });
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const res = await r.json();
+    status.innerHTML = `<span style="color:var(--success);font-size:0.85rem">Deployed ${res.provider} → <strong>${res.version}</strong> at ${new Date(res.deployed_at).toLocaleString()}.</span>`;
+    btn.textContent = `Deployed ${res.version}`;
+    // Refresh preview to show new version
+    document.getElementById('preview-provider').value = currentProposal.provider;
+    await loadPreviewVersions();
+    await loadPreview();
+  } catch(e) {
+    status.innerHTML = `<span style="color:var(--danger);font-size:0.8rem">Deploy failed: ${e.message}</span>`;
+    btn.disabled = false; btn.textContent = `Deploy as ${currentProposal.next_version}`;
+  }
+}
+
+// ===== Prompt preview =====
+async function loadPreviewVersions() {
+  const provider = document.getElementById('preview-provider').value;
+  const r = await fetch(`${API}/api/prompts/${provider}/versions`);
+  const d = await r.json();
+  const sel = document.getElementById('preview-version');
+  sel.innerHTML = '';
+  d.available_versions.forEach(v => {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v + (v === d.current_version ? ' (active)' : '');
+    if (v === d.current_version) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  document.getElementById('preview-active').textContent = d.current_version;
+}
+
+async function loadPreview() {
+  const provider = document.getElementById('preview-provider').value;
+  const version = document.getElementById('preview-version').value;
+  const url = version ? `${API}/api/prompts/${provider}?version=${version}` : `${API}/api/prompts/${provider}`;
+  const r = await fetch(url);
+  if (!r.ok) return;
+  const d = await r.json();
+  document.getElementById('preview-active').textContent = d.current_version;
+  currentSections = d.sections;
+  const tabs = document.getElementById('section-tabs');
+  tabs.innerHTML = '';
+  d.section_order.forEach(name => {
+    if (!d.sections[name]) return;
+    const t = document.createElement('div');
+    t.className = 'section-tab';
+    t.textContent = name;
+    t.onclick = () => showSection(name);
+    tabs.appendChild(t);
+  });
+  // Default: first section
+  showSection(d.section_order[0]);
+}
+
+function showSection(name) {
+  if (!currentSections) return;
+  currentSectionName = name;
+  document.querySelectorAll('.section-tab').forEach(t => t.classList.toggle('active', t.textContent === name));
+  document.getElementById('section-body').textContent = currentSections[name] || '(empty section)';
+}
+
+async function rollback() {
+  const provider = document.getElementById('preview-provider').value;
+  const version = document.getElementById('preview-version').value;
+  if (!confirm(`Activate ${provider} ${version}? Live calls will use this prompt immediately.`)) return;
+  try {
+    const r = await fetch(`${API}/api/prompts/${provider}/rollback`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ version })
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    await loadPreviewVersions();
+    await loadPreview();
+  } catch(e) {
+    alert('Rollback failed: ' + e.message);
+  }
+}
+
+(async () => {
+  await loadPreviewVersions();
+  await loadPreview();
+})();
+</script>
+</body>
+</html>

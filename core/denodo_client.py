@@ -5,8 +5,8 @@ Low-level HTTP client for Denodo Virtual DataPort REST web services.
 Handles authentication, pagination, and column normalization.
 
 Two endpoints:
-  - iv_allparts_info_for_ce  (allparts view)
-  - iv_plm_zagile_manufacture (manufacture view)
+  - iv_plm_allparts_info_latest (allparts view)
+  - iv_plm_zagile_manufacture   (manufacture view)
 """
 import logging
 import httpx
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Denodo REST endpoints
 # ---------------------------------------------------------------------------
-_ALLPARTS_URL = f"{settings.denodo_base_url_allparts}/views/iv_allparts_info_for_ce"
+_ALLPARTS_URL = f"{settings.denodo_base_url_allparts}/views/iv_plm_allparts_info_latest"
 _MANUFACTURE_URL = f"{settings.denodo_base_url_manufacture}/views/iv_plm_zagile_manufacture"
 _PAGE_SIZE = settings.denodo_page_size
 _TIMEOUT = settings.denodo_timeout
@@ -141,7 +141,7 @@ def fetch_allparts(
     group_by: list[str] | None = None,
     order_by: str | None = None,
 ) -> pd.DataFrame:
-    """Query iv_allparts_info_for_ce with auto-pagination."""
+    """Query iv_plm_allparts_info_latest with auto-pagination."""
     return _paginated_fetch(
         _ALLPARTS_URL,
         filter_expr=filter_expr,

@@ -148,6 +148,7 @@
   <a href="/" style="padding:0.7rem 1.5rem;font-size:0.85rem;font-weight:500;color:var(--accent);text-decoration:none;border-bottom:2px solid var(--accent);">Batch Process</a>
   <a href="/lookup" style="padding:0.7rem 1.5rem;font-size:0.85rem;font-weight:500;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;">Manual Lookup</a>
   <a href="/kpi" style="padding:0.7rem 1.5rem;font-size:0.85rem;font-weight:500;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;">KPI Dashboard</a>
+  <a href="/feedback" style="padding:0.7rem 1.5rem;font-size:0.85rem;font-weight:500;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;">CE Feedback</a>
 </nav>
 
 <main>
@@ -177,12 +178,18 @@
         <option value="10" selected>Top 10 categories</option>
       </select>
 
+      <label>LLM provider</label>
+      <select id="llm-provider">
+        <option value="" disabled selected>Checking connections...</option>
+      </select>
+      <div id="llm-status" style="font-size:0.72rem;color:var(--muted);margin-top:4px;">Probing Azure OpenAI and Gemini...</div>
+
       <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer;">
         <input type="checkbox" id="force-refresh"> Force refresh reference pool
       </label>
 
       <div style="margin-top:1rem">
-        <button class="run-btn" id="run-btn" onclick="runBatch()">Run Batch</button>
+        <button class="run-btn" id="run-btn" onclick="runBatch()" disabled>Run Batch</button>
       </div>
     </section>
 
@@ -256,6 +263,11 @@ async function runBatch() {
   const limit = limitVal ? parseInt(limitVal) : null;
   const checked = [...document.querySelectorAll('#phase-checkboxes input:checked')].map(e => e.value);
   const forceRefresh = document.getElementById('force-refresh').checked;
+  const llmProvider = document.getElementById('llm-provider').value;
+  if (!llmProvider) {
+    alert('No LLM provider available. Both Azure OpenAI and Gemini failed connection test.');
+    return;
+  }
 
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.textContent = 'Queuing…';
@@ -268,7 +280,8 @@ async function runBatch() {
         offset, limit,
         lifecycle_filter: checked.length ? checked : null,
         force_refresh_pool: forceRefresh,
-        vector_top_k: parseInt(document.getElementById('vector-top-k').value)
+        vector_top_k: parseInt(document.getElementById('vector-top-k').value),
+        llm_provider: llmProvider
       })
     });
     const {job_id} = await r.json();
@@ -425,10 +438,60 @@ async function buildVectorDB() {
   setTimeout(() => { btn.disabled = false; btn.textContent = 'Build / Refresh Vector DB'; }, 3000);
 }
 
+async function loadLlmStatus() {
+  const sel = document.getElementById('llm-provider');
+  const info = document.getElementById('llm-status');
+  const runBtn = document.getElementById('run-btn');
+  try {
+    const r = await fetch(`${API}/api/llm/status`);
+    const data = await r.json();
+    sel.innerHTML = '';
+    const providers = data.providers || {};
+    const order = ['azure', 'gemini'];
+    let firstOk = null;
+    const lines = [];
+    order.forEach(key => {
+      const p = providers[key];
+      if (!p) return;
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = p.label + (p.ok ? ` (${p.model})` : ' — unavailable');
+      if (!p.ok) {
+        opt.disabled = true;
+      } else if (firstOk === null) {
+        firstOk = key;
+      }
+      sel.appendChild(opt);
+      const dot = p.ok
+        ? '<span style="color:var(--success)">&#x25CF;</span>'
+        : '<span style="color:var(--danger)">&#x25CF;</span>';
+      const detail = p.ok ? p.model : (p.error || 'failed').slice(0, 80);
+      lines.push(`${dot} <strong>${p.label}</strong>: ${detail}`);
+    });
+    info.innerHTML = lines.join('<br>');
+    if (firstOk) {
+      const defaultKey = (data.default && providers[data.default] && providers[data.default].ok)
+        ? data.default : firstOk;
+      sel.value = defaultKey;
+      runBtn.disabled = false;
+    } else {
+      const noneOpt = document.createElement('option');
+      noneOpt.value = ''; noneOpt.disabled = true; noneOpt.selected = true;
+      noneOpt.textContent = 'No LLM available';
+      sel.prepend(noneOpt);
+      runBtn.disabled = true;
+    }
+  } catch(e) {
+    info.innerHTML = '<span style="color:var(--danger)">Could not reach /api/llm/status: ' + e.message + '</span>';
+    runBtn.disabled = true;
+  }
+}
+
 loadConfig();
 loadHistory();
 loadCacheStatus();
 loadVectorDBStatus();
+loadLlmStatus();
 </script>
 </body>
 </html>

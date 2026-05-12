@@ -254,6 +254,7 @@
   <a href="/">Batch Process</a>
   <a href="/lookup">Manual Lookup</a>
   <a href="/kpi" class="active">KPI Dashboard</a>
+  <a href="/feedback">CE Feedback</a>
 </nav>
 
 <main>
@@ -336,7 +337,7 @@
     </div>
 
     <div id="detail-empty" style="text-align:center;padding:2rem;color:var(--muted);font-size:0.85rem;">
-      Click "Refresh" or take a snapshot to load detail data.
+      No cached state yet. Click <strong>Take Snapshot</strong> above to pull the latest data from Denodo.
     </div>
 
     <!-- Pagination -->
@@ -435,6 +436,10 @@
         <option value="">All Lifecycles</option>
       </select>
       <button class="page-btn" onclick="loadP1Details()" style="margin-left:4px">Refresh</button>
+      <input id="p1-search" type="search" placeholder="Search Item Number..."
+             oninput="onP1Search()"
+             style="margin-left:4px;width:200px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:4px 8px;font-size:0.78rem;font-family:var(--mono);">
+      <button class="page-btn" id="p1-search-clear" onclick="clearP1Search()" style="display:none">Clear</button>
       <div class="detail-count">Showing: <strong id="p1-detail-showing">0</strong> items</div>
     </div>
 
@@ -459,7 +464,7 @@
     </div>
 
     <div id="p1-detail-empty" style="text-align:center;padding:2rem;color:var(--muted);font-size:0.85rem;">
-      Click "Refresh" or take a Phase I snapshot to load details.
+      No cached Phase I state yet. Click <strong>Take Phase I Snapshot</strong> above to pull the latest data from Denodo.
     </div>
 
     <div class="pagination" id="p1-pagination" style="display:none">
@@ -897,6 +902,7 @@ let p1Details = [];
 let p1Sort = { col: null, asc: true };
 let p1Page = 1;
 let p1Filter = 'all';
+let p1Search = '';
 let p1TrendChart = null;
 let p1LifecycleChart = null;
 let p1PollTimer = null;
@@ -1125,6 +1131,37 @@ function setP1Filter(mode) {
   loadP1Details();
 }
 
+function getP1FilteredView() {
+  const q = (p1Search || '').trim().toLowerCase();
+  if (!q) return p1Details;
+  return p1Details.filter(r => String(r.Item_Number || '').toLowerCase().includes(q));
+}
+
+function onP1Search() {
+  p1Search = document.getElementById('p1-search').value;
+  document.getElementById('p1-search-clear').style.display = p1Search ? 'inline-block' : 'none';
+  p1Page = 1;
+  const view = getP1FilteredView();
+  document.getElementById('p1-detail-showing').textContent =
+    p1Search ? `${view.length.toLocaleString()} / ${p1Details.length.toLocaleString()}`
+             : p1Details.length.toLocaleString();
+  if (view.length === 0) {
+    document.getElementById('p1-detail-table-wrap').style.display = 'none';
+    document.getElementById('p1-pagination').style.display = 'none';
+    const empty = document.getElementById('p1-detail-empty');
+    empty.style.display = 'block';
+    empty.textContent = p1Search ? `No items matching "${p1Search}".` : 'No items found.';
+  } else {
+    document.getElementById('p1-detail-empty').style.display = 'none';
+    renderP1Page();
+  }
+}
+
+function clearP1Search() {
+  document.getElementById('p1-search').value = '';
+  onP1Search();
+}
+
 async function loadP1Details() {
   const lifecycle = document.getElementById('p1-lifecycle-filter').value;
   document.getElementById('p1-detail-loading').style.display = 'flex';
@@ -1145,10 +1182,10 @@ async function loadP1Details() {
     if (p1Details.length === 0) {
       document.getElementById('p1-detail-empty').style.display = 'block';
       document.getElementById('p1-detail-empty').textContent = 'No items found.';
+      document.getElementById('p1-detail-showing').textContent = '0';
     } else {
-      renderP1Page();
+      onP1Search();
     }
-    document.getElementById('p1-detail-showing').textContent = p1Details.length.toLocaleString();
   } catch(e) {
     document.getElementById('p1-detail-loading').style.display = 'none';
     document.getElementById('p1-detail-empty').style.display = 'block';
@@ -1180,9 +1217,11 @@ function sortP1Detail(col) {
 }
 
 function renderP1Page() {
-  const totalPages = Math.ceil(p1Details.length / PAGE_SIZE);
+  const view = getP1FilteredView();
+  const totalPages = Math.max(1, Math.ceil(view.length / PAGE_SIZE));
+  if (p1Page > totalPages) p1Page = totalPages;
   const start = (p1Page - 1) * PAGE_SIZE;
-  const rows = p1Details.slice(start, start + PAGE_SIZE);
+  const rows = view.slice(start, start + PAGE_SIZE);
   const tbody = document.getElementById('p1-detail-tbody');
   tbody.innerHTML = '';
   rows.forEach(row => {
@@ -1210,7 +1249,7 @@ function renderP1Page() {
 }
 
 function changeP1Page(delta) {
-  const totalPages = Math.ceil(p1Details.length / PAGE_SIZE);
+  const totalPages = Math.ceil(getP1FilteredView().length / PAGE_SIZE);
   p1Page = Math.max(1, Math.min(totalPages, p1Page + delta));
   renderP1Page();
   document.getElementById('p1-detail-table-wrap').scrollTop = 0;

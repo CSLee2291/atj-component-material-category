@@ -4,6 +4,11 @@ Azure OpenAI GPT caller
 Sends enriched context (target item + top-5 similar references) to GPT
 and parses the suggested ZZMCATG_M, ZZMCATG_S, and reasoning.
 Uses the openai SDK (AsyncAzureOpenAI).
+
+System prompts (the long instruction blocks with whitelist + CE-validated examples)
+are loaded at call time from data/prompts/azure/{current_version}.md via
+core.prompt_loader, so the CE Feedback page can deploy new prompt revisions
+without a code change.
 """
 import json
 import os
@@ -11,6 +16,9 @@ import re
 import logging
 from openai import AsyncAzureOpenAI
 from config import settings
+from core import prompt_loader
+
+PROVIDER = "azure"
 
 logger = logging.getLogger(__name__)
 
@@ -119,180 +127,41 @@ def _clean_gpt_result(result: dict) -> dict:
     return result
 
 
-ITEM_DESC_PREFIX_GUIDE = """
-== Advantech Item_Desc Prefix Decoding Guide ==
+def get_system_prompt() -> str:
+    """Assemble the first-pass system prompt for Azure from the active version
+    on disk, with the whitelist block injected."""
+    return prompt_loader.assemble(PROVIDER, "first_pass", _valid_categories_block())
 
-Item_Desc follows the pattern: @PREFIX MANUFACTURER_PART INFO
-The @PREFIX at the start of Item_Desc encodes the component type. Use this to determine the correct category.
 
---- English Prefixes (30+ types) ---
-@R        → Resistor (check suffix: chip, array, network, cement, carbon film, metal film, current sense, potentiometer, trimmer, thermistor NTC/PTC, varistor)
-@C        → Capacitor (check suffix: MLCC ceramic, electrolytic aluminum, electrolytic polymer, tantalum, film, super/EDLC)
-@CN       → Connector (check suffix: board-to-board, FFC/FPC, pin header, socket, terminal block, D-Sub, USB, RJ45, M.2, PCIe, SATA, SIM, SD, power)
-@TR       → Transistor (check suffix: MOSFET, BJT, IGBT, JFET, darlington)
-@LIN      → Linear IC — this is a broad category covering many analog IC sub-types. Use the sub-type rules below:
-              Sub-type: OpAmp / Operational Amplifier (OPA, LMV, LMC, TLV27x, LM6xxx, AD8xxx, MCP60x) → DAC|AMPX
-              Sub-type: Comparator (LMV331, LMV7239, TLV1704, LM339, LM393, MAX9xx) → DAC|AMPX  (Note: Advantech classifies comparators under DAC|AMPX, same as op-amps)
-              Sub-type: Analog Switch / Multiplexer (DG94xx, TS5A, ADG7xx, MAX48xx, FSA, SN74CBT) → DAC|MUXX
-              Sub-type: LVDS Driver/Receiver (SN65LVDS, DS90LV, MAX9xxx LVDS) → VDO|LVDS
-              Sub-type: Voltage Regulator LDO → LDO category
-              Sub-type: Voltage Reference → voltage reference category
-              Sub-type: Current Sense Amplifier → current sense category
-              Sub-type: Instrumentation Amplifier → DAC|AMPX
-              Sub-type: Power Management PMIC → PMIC category
-@LOG      → Logic IC (check suffix: buffer, gate AND/OR/NAND/NOR/XOR, flip-flop, latch, shift register, counter, level translator, bus transceiver)
-@D        → Diode (check suffix: rectifier, Schottky, Zener, TVS, signal, fast recovery, bridge rectifier, LED)
-@SA       → Surge Absorber / TVS array / ESD protector
-@X        → Relay (electromechanical)
-@RELAY    → Relay (same as @X)
-@OSC      → Oscillator / Crystal (check suffix: crystal unit, crystal oscillator TCXO/VCXO/OCXO, ceramic resonator, MEMS oscillator, SAW)
-@CNV      → DC-DC Converter module / Power module
-@L        → Inductor / Coil (check suffix: chip inductor, power inductor, common-mode choke, ferrite bead)
-@TF       → Transformer (check suffix: pulse, gate drive, power, LAN/Ethernet, audio, isolation)
-@F        → Fuse (check suffix: chip fuse, PTC resettable, glass tube, SMD)
-@SW       → Switch (check suffix: tact switch, DIP switch, slide, toggle, rocker, push-button, rotary encoder)
-@LED      → LED (check suffix: standard, high-power, SMD, through-hole, IR, UV). Category: LED|LEDS for SMD/surface-mount, LED|LEDD for DIP/through-hole
-@PH       → Photo device (check suffix: phototransistor, photodiode, photo interrupter, optocoupler, photo IC)
-@PHT      → LED display / LED indicator component — includes LED digit display (7-segment, numeric, alphanumeric), LED dot matrix, LED bar graph, LED light pipe, single LED. Category: LED|LEDS for SMD/surface-mount, LED|LEDD for DIP/through-hole. Example: "@PHT LF-3011MA ﾛ-ﾑ@GRN" = ROHM LF-3011MA SMD 1-digit LED display → LED|LEDS
-@PER      → Peripheral IC / Super I/O controller (e.g., SCH3114, SCH3227, W83627, IT8728, F81866) → SIO|SIOX. Note: LPCIO / Super I/O chips are NOT MCU/CPU — they are SIO category.
-@IC       → IC general (check suffix: microcontroller MCU, interface UART/SPI/I2C/Ethernet/CAN/RS-232/RS-485, timer, RTC, EEPROM, watchdog, motor driver, audio codec)
-@FPGA     → FPGA / CPLD
-@CPU,DSP  → Combined CPU/DSP prefix — if the part is a Digital Signal Processor (TMS320, ADSP, SHARC), use DSP|DSPX (NOT CPU|DSPX)
-@DSP      → Digital Signal Processor → DSP|DSPX (NOT CPU|DSPX — DSP uses the DSP major category, not CPU)
-@ADC      → A/D Converter IC
-@DAC      → D/A Converter IC
-@CODEC    → Audio/Video Codec
-@AMP      → Amplifier module
-@SEN      → Sensor (check suffix: temperature, humidity, pressure, accelerometer, gyroscope, gas, current, hall effect)
-@MOD      → Module (check suffix: wireless, Bluetooth, Wi-Fi, LTE/5G, GPS, LoRa, Zigbee)
-@FAN      → Fan / Cooling device
-@BAT      → Battery / Battery holder
-@MTR      → Motor / Actuator
-@BUZZER   → Buzzer / Speaker
-@ANT      → Antenna
+def get_category_select_prompt() -> str:
+    """Assemble the vector-fallback system prompt for Azure."""
+    return prompt_loader.assemble(PROVIDER, "fallback", _valid_categories_block())
 
---- Japanese Katakana Prefixes (15 types) ---
-@コア         → Core / Ferrite core
-@ブレーカ     → Breaker / Circuit breaker
-@センサ       → Sensor
-@ジャック     → Jack (audio, DC power, phone)
-@スイッチ     → Switch
-@コネクタ     → Connector
-@リレー       → Relay
-@トランス     → Transformer
-@コイル       → Coil / Inductor
-@ヒューズ     → Fuse
-@バリスタ     → Varistor
-@ダイオード   → Diode
-@コンデンサ   → Capacitor
-@ボリューム   → Volume / Potentiometer
-@ファン       → Fan
 
---- Category-Level Rules ---
-IMPORTANT: "DISPLAY MODULE" (ZZMCATG_M) is for semi-products and assembled modules ONLY, NOT for individual components.
-For individual LED components (including LED displays, 7-segment, dot matrix, LED indicators, single LEDs):
-  - SMD / surface-mount package → LED|LEDS
-  - DIP / through-hole package → LED|LEDD
-Package clues: "SMD", "SMT", "CHIP", "SOJ", "SOP" = surface-mount → LEDS. "DIP", "THT", "THRU-HOLE", "AR" (axial/radial) = through-hole → LEDD.
+# --- Legacy module-level aliases for tests / scripts that import these names ---
+# Live calls always go through get_system_prompt() / get_category_select_prompt() so
+# the prompt the LLM actually sees stays in sync with whatever the CE Feedback page
+# deployed at runtime. The lambdas below render the *currently active* prompt each
+# time someone reads them as strings.
 
---- CE-Validated Correction Examples (use these as ground truth) ---
-The following are real items that were incorrectly categorized and corrected by Component Engineering (CE).
-Use these examples to learn the correct mapping patterns:
+class _DynamicPrompt:
+    def __init__(self, fn):
+        self._fn = fn
+    def __str__(self):
+        return self._fn()
+    def __repr__(self):
+        return f"<DynamicPrompt {self._fn.__name__}>"
+    def __format__(self, spec):
+        return format(str(self), spec)
 
-@LIN + OpAmp/Amplifier → DAC|AMPX:
-  "@LIN LMC6772AIMM/NOPB TI" (dual CMOS op amp) → DAC|AMPX (NOT IC|BGA IC)
-  "@LIN LMV824MTX/NOPB TI" (quad CMOS op amp) → DAC|AMPX (NOT DAC|LEVL)
-  "@LIN LMV751M5/NOPB TI" (op amp) → DAC|AMPX (NOT IC|BGA IC)
-  "@LIN OPA4197IDR TI" (quad bipolar op amp) → DAC|AMPX (NOT PWR|DETC)
-  "@LIN LM6172IMX/NOPB TI" (dual high-speed op amp) → DAC|AMPX (NOT IC|BGA IC)
-  "@LIN TLV274IDR TI" (quad CMOS op amp) → DAC|AMPX (NOT LOG|COMR)
+SYSTEM_PROMPT = _DynamicPrompt(get_system_prompt)
+CATEGORY_SELECT_SYSTEM_PROMPT = _DynamicPrompt(get_category_select_prompt)
+ITEM_DESC_PREFIX_GUIDE = _DynamicPrompt(
+    lambda: prompt_loader.get_sections(PROVIDER).get("PREFIX_GUIDE", "")
+)
 
-@LIN + Comparator → DAC|AMPX:
-  "@LIN LMV7239M7/NOPB TI" (comparator) → DAC|AMPX (NOT LOG|COMR)
-  "@LIN TLV1704AIPWR TI" (quad comparator) → DAC|AMPX (NOT PWR|DETC)
-  "@LIN LMV331M7/NOPB TI" (low-voltage comparator) → DAC|AMPX (NOT PWR|DETC)
 
-@LIN + Analog Switch/MUX → DAC|MUXX:
-  "@LIN DG9431EDV-T1-GE3 VISH" (analog switch) → DAC|MUXX (NOT SWX|DETE)
-  "@LIN TS5A3159ADBVR TI" (analog switch/MUX) → DAC|MUXX (NOT TYC|MUXX)
-
-@LIN + LVDS → VDO|LVDS:
-  "@LIN SN65LVDS387DGGR TI" (LVDS line driver) → VDO|LVDS (NOT DIS|LVDS)
-
-@CPU,DSP + DSP → DSP|DSPX:
-  "@CPU,DSP TMS320C6746EZWT4" (TI DSP) → DSP|DSPX (NOT CPU|DSPX)
-  "@CPU,DSP TMS320C6657CZH8 T" (TI DSP) → DSP|DSPX (NOT CPU|DSPX)
-
-@PER + Super I/O → SIO|SIOX:
-  "(DEL26)@PER SCH3114I-NU MICROCHIP" (LPC Super I/O) → SIO|SIOX (NOT CPU|MCUX)
-
---- Special Keyword Fallback ---
-When the prefix is ambiguous or absent, look for these keywords ANYWHERE in Item_Desc or MFR_PART_NUMBER:
-FPGA        → FPGA category
-ARM / CORTEX → Microcontroller (MCU)
-FLASH       → Flash Memory
-RELAY       → Relay
-MOSFET      → MOSFET transistor
-IGBT        → IGBT transistor
-EEPROM      → EEPROM Memory
-SRAM / DRAM / SDRAM / DDR → Memory (volatile)
-NAND / NOR FLASH → Flash Memory (non-volatile)
-LDO         → Voltage Regulator (linear)
-BUCK / BOOST → DC-DC Converter (switching)
-OPAMP / OP-AMP → Operational Amplifier
-COMPARATOR  → Comparator
-UART / SPI / I2C / CAN / RS-232 / RS-485 / USB / Ethernet → Interface IC
-PWM         → PWM Controller
-PLL         → PLL / Clock IC
-RTC         → Real-Time Clock
-WATCHDOG / WDT → Watchdog Timer
-"""
-
-SYSTEM_PROMPT = f"""You are a PLM (Product Lifecycle Management) component categorization expert
-for Advantech. Your task is to assign the correct MATERIAL_CATEGORY to an electronic component
-based on its description, manufacturer part number, and the categories of similar components.
-
-MATERIAL_CATEGORY format is always: ZZMCATG_M|ZZMCATG_S
-where ZZMCATG_M is the middle-level category CODE (e.g. "DAC", "FLH", "CLK") and
-ZZMCATG_S is the small-level category CODE (e.g. "ADCX", "NORX", "RTCX").
-CATE_M_NAME and CATE_S_NAME shown in references are descriptive names — do NOT include them in your output codes.
-
-CRITICAL: ZZMCATG_M and ZZMCATG_S must be SHORT CODES ONLY (typically 2-4 uppercase letters).
-Do NOT include descriptive names like "DAC (DATA CONVERTER)" — just return "DAC".
-
-================================================================================
-*** HARD CONSTRAINT — VALID [MATERIAL_CATEGORY] WHITELIST ***
-================================================================================
-Your output MATERIAL_CATEGORY value MUST be one of the valid (ZZMCATG_M|ZZMCATG_S)
-pairs listed below. These are the ONLY values that exist in Advantech's PLM
-[MATERIAL_CATEGORY] master data. Any pair NOT on this list is INVALID — the PLM
-system will reject it. Common hallucination example: "CLK|CLKX" does NOT exist;
-the correct clock-generator code is "CLK|CLKG".
-
-BEFORE returning, you MUST:
-  1. Construct your candidate MATERIAL_CATEGORY (M|S).
-  2. Search for that exact string in the whitelist below.
-  3. If it is NOT present, pick the closest semantically-matching pair that IS
-     present. Do NOT invent new codes. Do NOT guess a pattern.
-  4. Re-verify your final answer is in the whitelist.
-
-VALID [MATERIAL_CATEGORY] values (each line is one allowed pair):
-{_valid_categories_block()}
-================================================================================
-
-{ITEM_DESC_PREFIX_GUIDE}
-
-Rules:
-- Use the Item_Desc prefix guide above to identify the component type FIRST, then cross-check with reference items.
-- If the prefix clearly indicates a component type but references suggest a different category, trust the prefix + MPN analysis over weak similarity matches.
-- Always respond in valid JSON only, no markdown, no explanation outside the JSON.
-- If confidence is low, set confidence to "low" and explain why in reason.
-- Suggest only category codes that appear in the VALID [MATERIAL_CATEGORY] whitelist above. Reference items may also be used as a hint, but the whitelist is the authoritative source.
-- If no whitelist pair is a good match, set confidence to "low" and pick the best available whitelist pair anyway — NEVER invent a code that is not in the whitelist.
-- JSON format: {{"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "confidence": "high|medium|low", "reason": "..."}}
-"""
-
-# Lazy-init client (created on first call)
+# Lazy-init Azure OpenAI client (created on first call)
 _client: AsyncAzureOpenAI | None = None
 
 
@@ -332,45 +201,6 @@ Top {len(references)} most similar components for reference:
 
 Based on the above, suggest ZZMCATG_M and ZZMCATG_S for the target component.
 Respond with valid JSON only."""
-
-
-CATEGORY_SELECT_SYSTEM_PROMPT = f"""You are a PLM (Product Lifecycle Management) component categorization expert
-for Advantech. You are given a target electronic component and a list of candidate MATERIAL_CATEGORY options
-retrieved from a vector similarity search.
-
-Your task is to select the BEST matching MATERIAL_CATEGORY from the candidates for the target component.
-
-CRITICAL: ZZMCATG_M and ZZMCATG_S must be SHORT CODES ONLY (typically 2-4 uppercase letters).
-Do NOT include descriptive names in the code fields. Example: return "DAC" not "DAC (DATA CONVERTER)".
-The descriptive names (CATE_M_NAME, CATE_S_NAME) go in their own separate fields.
-
-================================================================================
-*** HARD CONSTRAINT — VALID [MATERIAL_CATEGORY] WHITELIST ***
-================================================================================
-You MUST pick one of the candidate categories provided in the user message.
-ALL provided candidates are drawn from Advantech's authoritative
-[MATERIAL_CATEGORY] master data, so picking any listed candidate is safe.
-However, to be extra careful:
-  1. The MATERIAL_CATEGORY value you return MUST appear verbatim in the
-     candidate list below AND in the whitelist below.
-  2. Do NOT modify, shorten, or "correct" any candidate code — copy it exactly.
-  3. Do NOT invent codes. Hallucinated pairs like "CLK|CLKX" will be rejected
-     (the correct clock-generator code is "CLK|CLKG").
-
-VALID [MATERIAL_CATEGORY] values (each line is one allowed pair):
-{_valid_categories_block()}
-================================================================================
-
-{ITEM_DESC_PREFIX_GUIDE}
-
-Rules:
-- Use the Item_Desc prefix guide above to identify the component type FIRST, then select the best matching candidate.
-- If the prefix clearly indicates a component type, prefer candidates that match that type even if vector similarity is slightly lower.
-- Always respond in valid JSON only, no markdown, no explanation outside the JSON.
-- You MUST pick one of the provided candidate categories AND that pick must be present in the VALID [MATERIAL_CATEGORY] whitelist above. Do not invent new codes.
-- Consider the component's description and the first GPT analysis reason when choosing.
-- JSON format: {{"ZZMCATG_M": "...", "ZZMCATG_S": "...", "MATERIAL_CATEGORY": "...", "CATE_M_NAME": "...", "CATE_S_NAME": "...", "confidence": "high|medium|low", "reason": "..."}}
-"""
 
 
 def _build_category_select_prompt(
@@ -419,7 +249,7 @@ async def suggest_category_from_candidates(
         response = await client.chat.completions.create(
             model=settings.azure_openai_deployment,
             messages=[
-                {"role": "system", "content": CATEGORY_SELECT_SYSTEM_PROMPT},
+                {"role": "system", "content": get_category_select_prompt()},
                 {"role": "user", "content": _build_category_select_prompt(
                     target, first_reason, candidates
                 )},
@@ -456,7 +286,7 @@ async def suggest_category(target: dict, references: list[dict]) -> dict:
         response = await client.chat.completions.create(
             model=settings.azure_openai_deployment,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": get_system_prompt()},
                 {"role": "user", "content": _build_user_prompt(target, references)},
             ],
             temperature=0.1,
@@ -475,3 +305,20 @@ async def suggest_category(target: dict, references: list[dict]) -> dict:
             "confidence": "error",
             "reason": str(e),
         }
+
+
+async def test_connection() -> dict:
+    """Lightweight ping for the LLM connection-test endpoint."""
+    try:
+        if not settings.azure_openai_api_key or not settings.azure_openai_endpoint:
+            return {"ok": False, "error": "Missing Azure OpenAI endpoint or API key in .env"}
+        client = _get_client()
+        response = await client.chat.completions.create(
+            model=settings.azure_openai_deployment,
+            messages=[{"role": "user", "content": "ping"}],
+            max_completion_tokens=8,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        return {"ok": True, "model": settings.azure_openai_deployment, "sample": text[:60]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

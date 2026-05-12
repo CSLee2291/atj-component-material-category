@@ -16,12 +16,14 @@ GET  /api/kpi/snapshots      — all historical snapshots
 GET  /api/kpi/latest         — latest snapshot
 GET  /api/kpi/details        — per-item detail data
 """
+import asyncio
+import json
 import uuid
 import os
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, BackgroundTasks, Request, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from core.pipeline import run_batch, run_lookup
 from core.data_fetcher import refresh_target_cache, get_target_cache_info, check_denodo_health
@@ -31,6 +33,8 @@ from core.kpi_tracker import (
     get_phase1_detail, get_phase1_batch_status, write_phase1_results_to_excel,
 )
 from core.category_vector_db import build_vector_db, get_vector_db_info
+from core.llm_router import status as llm_status
+from core import feedback_engine, prompt_loader
 from export.excel_exporter import export_to_excel
 from config import settings
 
@@ -46,6 +50,7 @@ class BatchRequest(BaseModel):
     lifecycle_filter: Optional[list[str]] = None
     force_refresh_pool: bool = False
     vector_top_k: Optional[int] = None  # 5 or 10, None = use config default
+    llm_provider: Optional[str] = None  # "azure" | "gemini"
 
 
 async def _run_batch_job(job_id: str, req: BatchRequest):
@@ -58,6 +63,7 @@ async def _run_batch_job(job_id: str, req: BatchRequest):
             lifecycle_filter=req.lifecycle_filter,
             force_refresh_pool=req.force_refresh_pool,
             vector_top_k=req.vector_top_k,
+            llm_provider=req.llm_provider,
         )
         if df.empty:
             _jobs[job_id].update({
@@ -188,13 +194,19 @@ async def denodo_status():
 class LookupRequest(BaseModel):
     item_numbers: list[str]
     vector_top_k: Optional[int] = None
+    llm_provider: Optional[str] = None  # "azure" | "gemini"
 
 
-async def _run_lookup_job(job_id: str, item_numbers: list[str], vector_top_k: int | None = None):
+async def _run_lookup_job(
+    job_id: str,
+    item_numbers: list[str],
+    vector_top_k: int | None = None,
+    llm_provider: str | None = None,
+):
     _jobs[job_id]["status"] = "running"
     _jobs[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
     try:
-        df = await run_lookup(item_numbers, vector_top_k=vector_top_k)
+        df = await run_lookup(item_numbers, vector_top_k=vector_top_k, llm_provider=llm_provider)
         if df.empty:
             _jobs[job_id].update({
                 "status": "done", "total": 0, "high": 0, "medium": 0,
@@ -230,7 +242,9 @@ async def start_lookup(req: LookupRequest, background_tasks: BackgroundTasks):
         "requested_at": datetime.now(timezone.utc).isoformat(),
         "params":       {"item_count": len(req.item_numbers), "items": req.item_numbers[:20]},
     }
-    background_tasks.add_task(_run_lookup_job, job_id, req.item_numbers, req.vector_top_k)
+    background_tasks.add_task(
+        _run_lookup_job, job_id, req.item_numbers, req.vector_top_k, req.llm_provider
+    )
     return {"job_id": job_id, "status": "queued", "item_count": len(req.item_numbers)}
 
 
@@ -387,9 +401,12 @@ class Phase1BatchRequest(BaseModel):
     offset: int = 0
     limit: int = 100
     vector_top_k: Optional[int] = 10
+    llm_provider: Optional[str] = None  # "azure" | "gemini"
 
 
-async def _run_phase1_batch(job_id: str, offset: int, limit: int, vector_top_k: int):
+async def _run_phase1_batch(
+    job_id: str, offset: int, limit: int, vector_top_k: int, llm_provider: str | None = None
+):
     """Background task: run AI categorization on Phase I items, write results to Excel."""
     from core.kpi_tracker import _load_phase1_items
     _jobs[job_id]["status"] = "running"
@@ -406,7 +423,7 @@ async def _run_phase1_batch(job_id: str, offset: int, limit: int, vector_top_k: 
             return
 
         # Run through the lookup pipeline (same as manual lookup)
-        df = await run_lookup(batch_items, vector_top_k=vector_top_k)
+        df = await run_lookup(batch_items, vector_top_k=vector_top_k, llm_provider=llm_provider)
 
         if df.empty:
             _jobs[job_id].update({
@@ -450,5 +467,265 @@ async def start_phase1_batch(req: Phase1BatchRequest, background_tasks: Backgrou
         "requested_at": datetime.now(timezone.utc).isoformat(),
         "params":       {"offset": req.offset, "limit": req.limit, "vector_top_k": req.vector_top_k},
     }
-    background_tasks.add_task(_run_phase1_batch, job_id, req.offset, req.limit, req.vector_top_k or 10)
+    background_tasks.add_task(
+        _run_phase1_batch, job_id, req.offset, req.limit, req.vector_top_k or 10, req.llm_provider
+    )
     return {"job_id": job_id, "status": "queued", "offset": req.offset, "limit": req.limit}
+
+
+# ---------------------------------------------------------------------------
+# LLM provider connection-test endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/api/llm/status")
+async def llm_provider_status():
+    """Return per-provider availability so the UI can offer only working LLMs."""
+    return await llm_status()
+
+
+# ---------------------------------------------------------------------------
+# CE Feedback page
+# ---------------------------------------------------------------------------
+
+
+@router.get("/feedback", response_class=HTMLResponse)
+async def serve_feedback_ui():
+    with open("templates/feedback.html", encoding="utf-8") as f:
+        return HTMLResponse(f.read())
+
+
+def _validate_provider(provider: str) -> str:
+    if provider not in ("azure", "gemini"):
+        raise HTTPException(status_code=400, detail="provider must be 'azure' or 'gemini'")
+    return provider
+
+
+@router.post("/api/feedback/upload")
+async def feedback_upload(
+    provider: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Parse uploaded CE-feedback XLSX, build a proposed next-version prompt
+    file, hold it in memory under a proposal_id, return preview data."""
+    _validate_provider(provider)
+    content = await file.read()
+    try:
+        proposal = feedback_engine.build_proposal(provider, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse upload: {e}")
+    return feedback_engine.proposal_to_dict(proposal)
+
+
+@router.get("/api/feedback/proposal/{proposal_id}")
+async def feedback_proposal(proposal_id: str):
+    p = feedback_engine.get_proposal(proposal_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return feedback_engine.proposal_to_dict(p)
+
+
+@router.get("/api/feedback/proposal/{proposal_id}/markdown")
+async def feedback_proposal_markdown(proposal_id: str):
+    """Return the full proposed vN+1.md text for sectioned preview in the UI."""
+    p = feedback_engine.get_proposal(proposal_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    return JSONResponse({
+        "provider": p.provider,
+        "base_version": p.base_version,
+        "next_version": p.next_version,
+        "proposed_md": p.proposed_md,
+    })
+
+
+class TestRequest(BaseModel):
+    sample_limit: Optional[int] = 30  # cap re-run cost
+
+
+@router.post("/api/feedback/test/{proposal_id}")
+async def feedback_test(proposal_id: str, req: TestRequest = TestRequest()):
+    """Run two checks against the *proposed* prompt:
+    (a) Re-categorize a slice of the uploaded items, score new_AI vs CE.
+    (b) Run the regression set tests/ce_correction_verification.json.
+    Both run with a temporary version override pinned to this proposal so the
+    live app is unaffected.
+    """
+    from core.pipeline import run_lookup
+
+    p = feedback_engine.get_proposal(proposal_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="proposal not found")
+
+    # Stage the proposed markdown as a hidden version (vN+1) on disk so that
+    # prompt_loader can serve it. We DO NOT bump current.json yet — we instead
+    # temporarily flip it for the duration of the test.
+    next_v = p.next_version
+    next_path = prompt_loader._version_path(p.provider, next_v)
+    if not next_path.exists():
+        prompt_loader.write_version(p.provider, next_v, p.proposed_md)
+
+    base_v = prompt_loader.current_version(p.provider)
+    try:
+        prompt_loader.set_current_version(p.provider, next_v)
+
+        # (a) Uploaded-items re-categorize
+        sample_items = list(dict.fromkeys(p.sample_items))[: (req.sample_limit or 30)]
+        # Build expected-CE map from the proposal's pattern groups
+        ce_expected: dict[str, str] = {}
+        for g in p.pattern_groups:
+            for item in g["all_items"]:
+                ce_expected[item] = g["ce"]
+
+        a_correct = 0
+        a_total = 0
+        a_details = []
+        if sample_items:
+            df = await run_lookup(sample_items, vector_top_k=10, llm_provider=p.provider)
+            for r in df.to_dict(orient="records"):
+                item = r.get("Item_Number", "")
+                got = r.get("AI_MATERIAL_CATEGORY", "")
+                expected = ce_expected.get(item, "")
+                if not expected:
+                    continue
+                a_total += 1
+                ok = got == expected
+                if ok:
+                    a_correct += 1
+                a_details.append({
+                    "item": item, "expected": expected, "got": got, "ok": ok,
+                })
+        a_pct = round(a_correct * 100 / a_total, 1) if a_total else 0.0
+
+        # (b) Regression set
+        regression_path = "tests/ce_correction_verification.json"
+        b_correct = 0
+        b_total = 0
+        b_details = []
+        if os.path.exists(regression_path):
+            with open(regression_path, encoding="utf-8") as f:
+                cases = json.load(f).get("test_cases", [])
+            reg_items = [c.get("item_number") for c in cases if c.get("item_number") and c.get("expected_category")]
+            reg_expected = {
+                c["item_number"]: c["expected_category"]
+                for c in cases
+                if c.get("item_number") and c.get("expected_category")
+            }
+            if reg_items:
+                df_b = await run_lookup(reg_items, vector_top_k=10, llm_provider=p.provider)
+                for r in df_b.to_dict(orient="records"):
+                    item = r.get("Item_Number", "")
+                    got = r.get("AI_MATERIAL_CATEGORY", "")
+                    expected = reg_expected.get(item, "")
+                    if not expected:
+                        continue
+                    b_total += 1
+                    ok = got == expected
+                    if ok:
+                        b_correct += 1
+                    b_details.append({
+                        "item": item, "expected": expected, "got": got, "ok": ok,
+                    })
+        b_pct = round(b_correct * 100 / b_total, 1) if b_total else 0.0
+
+        results = {
+            "uploaded_items": {
+                "correct": a_correct, "total": a_total, "pct": a_pct,
+                "sampled": len(sample_items), "details": a_details,
+            },
+            "regression": {
+                "correct": b_correct, "total": b_total, "pct": b_pct,
+                "details": b_details,
+            },
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+        feedback_engine.write_test_results(proposal_id, results)
+        return results
+    finally:
+        # Always revert to the original active version after testing.
+        prompt_loader.set_current_version(p.provider, base_v)
+
+
+@router.post("/api/feedback/deploy/{proposal_id}")
+async def feedback_deploy(proposal_id: str):
+    """Activate the proposed prompt as the new current version. The version
+    file was written during /test, so this just bumps current.json."""
+    p = feedback_engine.get_proposal(proposal_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="proposal not found")
+    if not p.test_results:
+        raise HTTPException(
+            status_code=400,
+            detail="Run /api/feedback/test/{id} before deploying.",
+        )
+    try:
+        return feedback_engine.deploy_proposal(proposal_id)
+    except FileExistsError as e:
+        # Already written during the test step — just bump pointer.
+        prompt_loader.set_current_version(p.provider, p.next_version)
+        return {
+            "provider": p.provider,
+            "version": p.next_version,
+            "deployed_at": datetime.now(timezone.utc).isoformat(),
+            "note": str(e),
+        }
+
+
+@router.get("/api/feedback/proposals")
+async def feedback_proposals():
+    return [feedback_engine.proposal_to_dict(p) for p in feedback_engine.list_recent_proposals()]
+
+
+# ---------------------------------------------------------------------------
+# Prompt preview / version management
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/prompts/{provider}")
+async def prompt_preview(provider: str, version: Optional[str] = None):
+    """Return the sectioned prompt for previewing in the UI."""
+    _validate_provider(provider)
+    try:
+        v = version or prompt_loader.current_version(provider)
+        sections = prompt_loader.get_sections(provider, v)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "provider": provider,
+        "version": v,
+        "current_version": prompt_loader.current_version(provider),
+        "available_versions": prompt_loader.list_versions(provider),
+        "sections": sections,
+        "section_order": [
+            "FIRST_PASS_HEADER", "FALLBACK_HEADER", "PREFIX_GUIDE",
+            "CE_EXAMPLES", "FIRST_PASS_RULES", "FALLBACK_RULES",
+        ],
+    }
+
+
+@router.get("/api/prompts/{provider}/versions")
+async def prompt_versions(provider: str):
+    _validate_provider(provider)
+    return {
+        "provider": provider,
+        "current_version": prompt_loader.current_version(provider),
+        "available_versions": prompt_loader.list_versions(provider),
+    }
+
+
+class RollbackRequest(BaseModel):
+    version: str
+
+
+@router.post("/api/prompts/{provider}/rollback")
+async def prompt_rollback(provider: str, req: RollbackRequest):
+    _validate_provider(provider)
+    try:
+        prompt_loader.set_current_version(provider, req.version)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "provider": provider,
+        "current_version": prompt_loader.current_version(provider),
+    }

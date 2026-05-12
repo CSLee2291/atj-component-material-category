@@ -35,6 +35,13 @@ _PHASE1_EXCEL = os.path.join(
     "Phase_I_PUR_2024_2025.xlsx",
 )
 
+# Current-state caches refreshed by Take Snapshot. Dashboard detail tables read
+# these so the browser doesn't re-query Denodo for 80K / 7.9K items on every
+# Refresh click; historical weekly metrics live separately in snapshots.json /
+# phase1_snapshots.json.
+_ALL_ATJ_STATE_FILE = os.path.join(settings.target_cache_dir, "kpi_all_atj_state.parquet")
+_PHASE1_STATE_FILE = os.path.join(settings.target_cache_dir, "kpi_phase1_state.parquet")
+
 # Serialize read-modify-write on the JSON file
 _file_lock = threading.Lock()
 
@@ -120,23 +127,46 @@ def _compute_snapshot(df: pd.DataFrame) -> dict:
 
 def take_snapshot() -> dict:
     """
-    Fetch current ATJ component data, compute metrics, save snapshot.
-    If a snapshot for the current ISO week already exists, overwrites it.
-    Returns the new snapshot dict.
-    """
-    from core.data_fetcher import fetch_all_atj_components
+    Refresh the All-ATJ current-state cache from Denodo, compute weekly metrics,
+    append/overwrite the ISO-week entry in snapshots.json.
 
-    logger.info("Taking KPI snapshot...")
+    After this call:
+      - data/cache/kpi_all_atj_state.parquet holds the latest per-item state
+        (used by the dashboard detail table on every Refresh).
+      - data/kpi/snapshots.json has an appended historical metric row so the
+        Weekly Completion Trend chart can plot week-over-week progress.
+    """
+    from core.data_fetcher import fetch_all_atj_components, fetch_manufacture_bulk
+
+    logger.info("Taking KPI snapshot (refreshing All ATJ state cache)...")
     df = fetch_all_atj_components()
 
     if df.empty:
         raise RuntimeError("No ATJ components found — cannot take snapshot")
 
+    # Merge manufacture data in bulk so the detail table can render rows
+    # straight from the cache without touching Denodo again.
+    item_numbers = df["Item_Number"].tolist()
+    mfr_df = fetch_manufacture_bulk(item_numbers)
+    if not mfr_df.empty:
+        mfr_dedup = mfr_df.drop_duplicates(subset=["Item_Number"], keep="first")
+        df = df.merge(
+            mfr_dedup[["Item_Number", "MANUFACTURE_NAME", "MFR_PART_NUMBER"]],
+            on="Item_Number", how="left",
+        )
+    else:
+        df["MANUFACTURE_NAME"] = ""
+        df["MFR_PART_NUMBER"] = ""
+
+    # Persist current state
+    os.makedirs(settings.target_cache_dir, exist_ok=True)
+    df.to_parquet(_ALL_ATJ_STATE_FILE, index=False)
+    logger.info("Wrote All ATJ state cache: %d rows -> %s", len(df), _ALL_ATJ_STATE_FILE)
+
     snapshot = _compute_snapshot(df)
 
     with _file_lock:
         snapshots = _load_snapshots()
-        # Remove any existing snapshot for same week (overwrite)
         snapshots = [s for s in snapshots if s["week"] != snapshot["week"]]
         snapshots.append(snapshot)
         snapshots.sort(key=lambda s: s["week"])
@@ -165,16 +195,18 @@ def get_latest_snapshot() -> dict | None:
 
 def get_detail_data(filter_mode: str = "all", lifecycle: str | None = None) -> list[dict]:
     """
-    Return per-item detail for the dashboard table.
-    Each row: Item_Number, Item_Desc, MATERIAL_CATEGORY, LifeCycle_Phase,
-              MANUFACTURE_NAME, MFR_PART_NUMBER.
+    Return per-item detail for the dashboard table, read from the All-ATJ
+    state cache refreshed by take_snapshot(). If no snapshot has been taken
+    yet, returns an empty list (the UI should prompt the user to take one).
 
     filter_mode: "all" | "filled" | "blank"
     lifecycle:   optional lifecycle phase filter
     """
-    from core.data_fetcher import fetch_all_atj_components, fetch_manufacture_for_items_batched
+    if not os.path.exists(_ALL_ATJ_STATE_FILE):
+        logger.info("All ATJ state cache missing — take a snapshot to populate")
+        return []
 
-    df = fetch_all_atj_components()
+    df = pd.read_parquet(_ALL_ATJ_STATE_FILE)
     if df.empty:
         return []
 
@@ -190,20 +222,6 @@ def get_detail_data(filter_mode: str = "all", lifecycle: str | None = None) -> l
     if df.empty:
         return []
 
-    # Fetch manufacture data for all items
-    item_numbers = df["Item_Number"].tolist()
-    mfr_df = fetch_manufacture_for_items_batched(item_numbers)
-
-    if not mfr_df.empty:
-        # Keep first manufacturer per item (1:many -> 1:1)
-        mfr_dedup = mfr_df.drop_duplicates(subset=["Item_Number"], keep="first")
-        df = df.merge(mfr_dedup[["Item_Number", "MANUFACTURE_NAME", "MFR_PART_NUMBER"]],
-                       on="Item_Number", how="left")
-    else:
-        df["MANUFACTURE_NAME"] = ""
-        df["MFR_PART_NUMBER"] = ""
-
-    # Select and order columns
     cols = ["Item_Number", "Item_Desc", "MATERIAL_CATEGORY", "LifeCycle_Phase",
             "MANUFACTURE_NAME", "MFR_PART_NUMBER"]
     for c in cols:
@@ -245,25 +263,47 @@ def _save_phase1_snapshots(snapshots: list[dict]) -> None:
 
 def take_phase1_snapshot() -> dict:
     """
-    Take a Phase I KPI snapshot:
-    - Read item list from Excel
-    - Query Denodo for their current MATERIAL_CATEGORY status
-    - Compute filled/blank/pct
-    - Save to phase1_snapshots.json (one per ISO week)
+    Refresh the Phase I current-state cache from Denodo and save weekly metrics.
+
+    After this call:
+      - data/cache/kpi_phase1_state.parquet has the latest per-item state for
+        all 7,968 Phase I items (Item_Number, Item_Desc, MATERIAL_CATEGORY,
+        LifeCycle_Phase, MANUFACTURE_NAME, MFR_PART_NUMBER).
+      - data/kpi/phase1_snapshots.json has a new ISO-week entry so the Phase I
+        trend chart can plot past vs. current week.
     """
-    from core.data_fetcher import fetch_items_info
+    from core.data_fetcher import fetch_items_info, fetch_manufacture_bulk
 
     items = _load_phase1_items()
     logger.info("Phase I KPI: %d items from Excel", len(items))
 
-    # Query Denodo in batches of 500
+    # Query Denodo in batches of 500 — bypass the target parquet cache so the
+    # snapshot always reflects live Denodo state at the moment of the click.
     frames = []
     for i in range(0, len(items), 500):
         batch = items[i:i + 500]
-        df = fetch_items_info(batch)
+        df = fetch_items_info(batch, use_cache=False)
         if not df.empty:
             frames.append(df)
     df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    # Merge manufacture data in bulk so the detail table can render from cache
+    if not df.empty:
+        mfr_df = fetch_manufacture_bulk(df["Item_Number"].tolist())
+        if not mfr_df.empty:
+            mfr_dedup = mfr_df.drop_duplicates(subset=["Item_Number"], keep="first")
+            df = df.merge(
+                mfr_dedup[["Item_Number", "MANUFACTURE_NAME", "MFR_PART_NUMBER"]],
+                on="Item_Number", how="left",
+            )
+        else:
+            df["MANUFACTURE_NAME"] = ""
+            df["MFR_PART_NUMBER"] = ""
+
+    # Persist current state cache (dashboard reads from this on every Refresh)
+    os.makedirs(settings.target_cache_dir, exist_ok=True)
+    df.to_parquet(_PHASE1_STATE_FILE, index=False)
+    logger.info("Wrote Phase I state cache: %d rows -> %s", len(df), _PHASE1_STATE_FILE)
 
     now = datetime.now(timezone.utc)
     week_id = now.strftime("%G-W%V")
@@ -334,28 +374,18 @@ def get_phase1_latest() -> dict | None:
 
 def get_phase1_detail(filter_mode: str = "all", lifecycle: str | None = None) -> list[dict]:
     """
-    Return per-item detail for Phase I items.
-    Queries Denodo for current status + manufacture data.
+    Return per-item detail for Phase I items, read from the state cache refreshed
+    by take_phase1_snapshot(). If no snapshot has been taken yet, returns an
+    empty list (the UI should prompt the user to take one).
     """
-    from core.data_fetcher import fetch_items_info, fetch_manufacture_for_items_batched
-
-    items = _load_phase1_items()
-    if not items:
+    if not os.path.exists(_PHASE1_STATE_FILE):
+        logger.info("Phase I state cache missing — take a Phase I snapshot to populate")
         return []
 
-    # Fetch item info in batches
-    frames = []
-    for i in range(0, len(items), 500):
-        batch = items[i:i + 500]
-        df = fetch_items_info(batch)
-        if not df.empty:
-            frames.append(df)
-    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
+    df = pd.read_parquet(_PHASE1_STATE_FILE)
     if df.empty:
         return []
 
-    # Apply filter
     if filter_mode == "filled":
         df = df[df["MATERIAL_CATEGORY"].fillna("").str.strip().ne("")].reset_index(drop=True)
     elif filter_mode == "blank":
@@ -366,18 +396,6 @@ def get_phase1_detail(filter_mode: str = "all", lifecycle: str | None = None) ->
 
     if df.empty:
         return []
-
-    # Fetch manufacture data
-    item_numbers = df["Item_Number"].tolist()
-    mfr_df = fetch_manufacture_for_items_batched(item_numbers)
-
-    if not mfr_df.empty:
-        mfr_dedup = mfr_df.drop_duplicates(subset=["Item_Number"], keep="first")
-        df = df.merge(mfr_dedup[["Item_Number", "MANUFACTURE_NAME", "MFR_PART_NUMBER"]],
-                       on="Item_Number", how="left")
-    else:
-        df["MANUFACTURE_NAME"] = ""
-        df["MFR_PART_NUMBER"] = ""
 
     cols = ["Item_Number", "Item_Desc", "MATERIAL_CATEGORY", "LifeCycle_Phase",
             "MANUFACTURE_NAME", "MFR_PART_NUMBER"]

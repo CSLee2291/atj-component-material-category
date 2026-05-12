@@ -151,6 +151,180 @@
       "expected_category": "DAC|AMPX",
       "wrong_ai_category": "LOG|COMR",
       "correction_rule": "@LIN + OpAmp (TLV274) -> DAC|AMPX (not LOG|COMR)"
+    },
+    {
+      "item_number": "11TJ2040363-7",
+      "expected_category": "AEC|EDLC",
+      "wrong_ai_category": "FMC|PFIC",
+      "correction_rule": "@C Tokin 5.5V supercap (FYH/FGR/FGH/FM0/FC0/FYD0H + 0.1F~5F + RAD/TAP) -> AEC|EDLC"
+    },
+    {
+      "item_number": "11TJ3065227-9",
+      "expected_category": "AEC|AECX",
+      "wrong_ai_category": "PMC|PASC",
+      "correction_rule": "@C Nichicon UCD chip electrolytic (M TAP- + uF) -> AEC|AECX"
+    },
+    {
+      "item_number": "12TJ5625302-0",
+      "expected_category": "OPT|OPTR",
+      "wrong_ai_category": "THY|SCR",
+      "correction_rule": "@! SSR ASSR-1218 photocoupler-driven SSR -> OPT|OPTR"
+    },
+    {
+      "item_number": "13TJ0194699-9",
+      "expected_category": "OPT|OPTR",
+      "wrong_ai_category": "LED|LEDD",
+      "correction_rule": "@PHT Toshiba TLP-series photocoupler -> OPT|OPTR (not LED|LEDD)"
+    },
+    {
+      "item_number": "13TJ1141164-3",
+      "expected_category": "OPT|OPTR",
+      "wrong_ai_category": "LED|LEDS",
+      "correction_rule": "@PHT Renesas/NEC PS2801C photocoupler -> OPT|OPTR (not LED|LEDS)"
+    },
+    {
+      "item_number": "13TJ3092634-4",
+      "expected_category": "OPT|OPTR",
+      "wrong_ai_category": "LED|LEDD",
+      "correction_rule": "@PHT Broadcom HCNR200 linear photocoupler -> OPT|OPTR"
+    },
+    {
+      "item_number": "13TJ2853872-8",
+      "expected_category": "OPT|OPTR",
+      "wrong_ai_category": "THY|TRIC",
+      "correction_rule": "@PHT Toshiba TLP3062A opto-isolated triac driver -> OPT|OPTR (not THY|TRIC)"
+    },
+    {
+      "item_number": "14TJ3202326-0",
+      "expected_category": "OPT|OPTR",
+      "wrong_ai_category": "OM|LED",
+      "correction_rule": "@PHT Toshiba TLP352 gate-driver photocoupler -> OPT|OPTR"
+    },
+    {
+      "item_number": "14TJ2110295-9",
+      "expected_category": "ITF|CANX",
+      "wrong_ai_category": "PWR|DRVR",
+      "correction_rule": "@LIN PCA82C251 NXP CAN transceiver -> ITF|CANX (not PWR|DRVR)"
+    },
+    {
+      "item_number": "14TJ5620717-6",
+      "expected_category": "ITF|UART",
+      "wrong_ai_category": "DAT|LANX",
+      "correction_rule": "@LIN THVD1520 RS-485 transceiver -> ITF|UART"
+    },
+    {
+      "item_number": "14TJ2613197-3",
+      "expected_category": "PWR|DETC",
+      "wrong_ai_category": "CTL|CARD",
+      "correction_rule": "@LIN S-80929 CMOS voltage detector -> PWR|DETC"
+    },
+    {
+      "item_number": "14TJ9920651-3",
+      "expected_category": "PWR|PUMP",
+      "wrong_ai_category": "LOG|BUSX",
+      "correction_rule": "@LIN LTC3260 inverting charge pump -> PWR|PUMP"
+    },
+    {
+      "item_number": "14TJ4067699-0",
+      "expected_category": "DAC|OTHR",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@LIN Si8662EC digital isolator -> DAC|OTHR"
+    },
+    {
+      "item_number": "14TJ3051693-6",
+      "expected_category": "DAC|DACX",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@LIN BH2220FVM ROHM DA 8BIT -> DAC|DACX"
+    },
+    {
+      "item_number": "14TJ5626052-2",
+      "expected_category": "DAC|AMPX",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@! IC INA122 instrumentation amplifier -> DAC|AMPX"
+    },
+    {
+      "item_number": "14TJ9544575-0",
+      "expected_category": "DAT|LANX",
+      "wrong_ai_category": "SIO|SIOX",
+      "correction_rule": "@PER KSZ8895 Microchip Ethernet switch -> DAT|LANX (not SIO|SIOX)"
+    },
+    {
+      "item_number": "14TJ3092778-2",
+      "expected_category": "VDO|OTHR",
+      "wrong_ai_category": "SIO|SIOX",
+      "correction_rule": "@PER SII164 Silicon Image PanelLink/DVI transmitter -> VDO|OTHR"
+    },
+    {
+      "item_number": "14TJ5620214-0",
+      "expected_category": "DVR|MOTO",
+      "wrong_ai_category": "IC|BGA IC",
+      "correction_rule": "@! IC MCC08E Melec motor controller -> DVR|MOTO"
+    },
+    {
+      "item_number": "14TJ3067015-3",
+      "expected_category": "SEN|OTHR",
+      "wrong_ai_category": "SEN|TEMP",
+      "correction_rule": "@センサ LEM HX20-P current transducer -> SEN|OTHR (not SEN|TEMP)"
+    },
+    {
+      "item_number": "14TJ9602254-3",
+      "expected_category": "SEN|GSEN",
+      "wrong_ai_category": "SEN|TEMP",
+      "correction_rule": "@センサ Fujikura AG206 accelerometer -> SEN|GSEN"
+    },
+    {
+      "item_number": "12TJ1084261-6",
+      "expected_category": "XFM|LXFR",
+      "wrong_ai_category": "TMR|TMRX",
+      "correction_rule": "@T Tamura 12T04 line transformer -> XFM|LXFR (not TMR|TMRX)"
+    },
+    {
+      "item_number": "10TJ2608437-1",
+      "expected_category": "TKR|TKFR",
+      "wrong_ai_category": "CMR|CMRX",
+      "correction_rule": "@R Susumu RG1608P thin-film chip resistor -> TKR|TKFR"
+    },
+    {
+      "item_number": "16TJ0181099-0",
+      "expected_category": "WTB|WAFE",
+      "wrong_ai_category": "CPM|CFXX",
+      "correction_rule": "@CN Hirose DF1B wire-to-board header -> WTB|WAFE (not CPM/IC socket)"
+    },
+    {
+      "item_number": "16TJ0091512-7",
+      "expected_category": "WTB|ATXP",
+      "wrong_ai_category": "CPM|CFAS",
+      "correction_rule": "@CN Molex 5566-* power header -> WTB|ATXP (not CPM|CFAS)"
+    },
+    {
+      "item_number": "16TJ0053833-1",
+      "expected_category": "ACCY|HOUS",
+      "wrong_ai_category": "OTH|BNCX",
+      "correction_rule": "@CN JST XHP-* plug housing -> ACCY|HOUS (not OTH|BNCX)"
+    },
+    {
+      "item_number": "16TJ0047951-3",
+      "expected_category": "WTB|PINH",
+      "wrong_ai_category": "IOC|DCPJ",
+      "correction_rule": "@CN JAE PS-10PF-D4T1-PKL1 pin header -> WTB|PINH"
+    },
+    {
+      "item_number": "16TJ0188628-7",
+      "expected_category": "FPC|LVDS",
+      "wrong_ai_category": "OTH|SMAX",
+      "correction_rule": "@CN KEL TMC01-51S-A SMTH FFC connector -> FPC|LVDS"
+    },
+    {
+      "item_number": "16TJ5620746-0",
+      "expected_category": "IOC|DSUB",
+      "wrong_ai_category": "OTH|BNCX",
+      "correction_rule": "@! CN Omron XM3C 9P D-Sub -> IOC|DSUB"
+    },
+    {
+      "item_number": "16TJ0098897-3",
+      "expected_category": "OTH|CIRC",
+      "wrong_ai_category": "IOC|DSUB",
+      "correction_rule": "@CN Hirose RP17 circular connector -> OTH|CIRC"
     }
   ]
 }

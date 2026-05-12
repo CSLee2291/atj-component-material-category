@@ -8,8 +8,8 @@ load_dotenv(dotenv_path=".env", override=True)
 
 class Settings(BaseSettings):
     # Denodo REST API (primary data source)
-    denodo_base_url_allparts: str = "https://acldtpltfrm-dev:9443/server/dx_ce/ws_allparts_info_for_ce_app"
-    denodo_base_url_manufacture: str = "https://acldtpltfrm-dev:9443/server/dx_ce/iv_plm_zagile_manufacture_ce_app"
+    denodo_base_url_allparts: str = "https://dataplatform.advantech.com.tw:9443/server/dx_ce/ws_plm_allparts_info_latest_ce_app"
+    denodo_base_url_manufacture: str = "https://dataplatform.advantech.com.tw:9443/server/dx_ce/ws_plm_zagile_manufacture_ce_app"
     denodo_username: str = ""
     denodo_password: str = ""
     denodo_timeout: int = 60
@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = ""
     azure_openai_deployment: str = "gpt-5.4"
     azure_openai_api_version: str = "2024-12-01-preview"
+
+    # LLM provider selector ("azure" | "gemini") — chosen at request time;
+    # this is just the server-side default fallback.
+    llm_provider: str = "azure"
+
+    # Google Vertex AI Gemini
+    gemini_credentials_path: str = "../google_api/indigo-medium-491407-j1-3b43724862db.json"
+    gemini_project_id: str = "indigo-medium-491407-j1"
+    gemini_location: str = "us-central1"
+    gemini_model: str = "gemini-2.5-pro"
 
     # Batch settings
     batch_size_dev: int = 100

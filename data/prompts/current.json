@@ -1,0 +1,5 @@
+{
+  "azure": "v2",
+  "gemini": "v1",
+  "_note": "Pointers to the active prompt version per provider. Updated by the CE Feedback page."
+}

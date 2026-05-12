@@ -18,7 +18,7 @@ from core.data_fetcher import (
     fetch_atj_reference_pool,
 )
 from core.fuzzy_matcher import find_top_k_similar
-from core.gpt_caller import suggest_category, suggest_category_from_candidates
+from core.llm_router import suggest_category, suggest_category_from_candidates
 from core.category_vector_db import search_categories, is_vector_db_ready
 from config import settings
 
@@ -38,6 +38,7 @@ async def process_single_item(
     mfr_df: pd.DataFrame,
     reference_pool: pd.DataFrame,
     vector_top_k: int | None = None,
+    llm_provider: str | None = None,
 ) -> dict:
     """
     Process one ATJ item:
@@ -65,7 +66,7 @@ async def process_single_item(
     references = similar_df.to_dict(orient="records") if not similar_df.empty else []
     no_fuzzy_matches = len(references) == 0
 
-    suggestion = await suggest_category(target, references)
+    suggestion = await suggest_category(llm_provider, target, references)
     first_confidence = suggestion.get("confidence", "error")
     first_reason = suggestion.get("reason", "")
 
@@ -85,7 +86,7 @@ async def process_single_item(
         if vector_candidates:
             # 2nd GPT call with vector candidates
             fallback_suggestion = await suggest_category_from_candidates(
-                target, first_reason, vector_candidates
+                llm_provider, target, first_reason, vector_candidates
             )
             # Always prefer vector fallback when first pass was low/error,
             # because vector categories are more semantically relevant than
@@ -135,6 +136,7 @@ async def run_batch(
     lifecycle_filter: list[str] | None = None,
     force_refresh_pool: bool = False,
     vector_top_k: int | None = None,
+    llm_provider: str | None = None,
 ) -> pd.DataFrame:
     """
     Main entry point. Returns DataFrame of results for this batch.
@@ -163,7 +165,10 @@ async def run_batch(
 
     async def bounded(row):
         async with sem:
-            return await process_single_item(row, mfr_df, reference_pool, vector_top_k=vector_top_k)
+            return await process_single_item(
+                row, mfr_df, reference_pool,
+                vector_top_k=vector_top_k, llm_provider=llm_provider,
+            )
 
     tasks = [bounded(row) for row in targets_df.to_dict(orient="records")]
     results = await asyncio.gather(*tasks)
@@ -171,7 +176,11 @@ async def run_batch(
     return pd.DataFrame(results)
 
 
-async def run_lookup(item_numbers: list[str], vector_top_k: int | None = None) -> pd.DataFrame:
+async def run_lookup(
+    item_numbers: list[str],
+    vector_top_k: int | None = None,
+    llm_provider: str | None = None,
+) -> pd.DataFrame:
     """
     Process a user-supplied list of item numbers through the same
     fuzzy-match + GPT categorization pipeline used for batch processing.
@@ -197,7 +206,10 @@ async def run_lookup(item_numbers: list[str], vector_top_k: int | None = None) -
 
     async def bounded(row):
         async with sem:
-            return await process_single_item(row, mfr_df, reference_pool, vector_top_k=vector_top_k)
+            return await process_single_item(
+                row, mfr_df, reference_pool,
+                vector_top_k=vector_top_k, llm_provider=llm_provider,
+            )
 
     tasks = [bounded(row) for row in items_df.to_dict(orient="records")]
     results = await asyncio.gather(*tasks)

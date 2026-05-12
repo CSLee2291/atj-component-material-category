@@ -56,10 +56,11 @@ def _fetch_all_atj_targets_from_denodo() -> pd.DataFrame:
     from core.denodo_client import fetch_allparts
 
     # VQL filter: blank MATERIAL_CATEGORY + TJ prefix (not CMTJ)
+    # Identifiers must be double-quoted — the new Denodo views lowercase bare names
     filter_expr = (
-        "(MATERIAL_CATEGORY is null OR MATERIAL_CATEGORY = '') "
-        "AND Item_Number like '%TJ%' "
-        "AND Item_Number not like '%CMTJ%'"
+        "(\"MATERIAL_CATEGORY\" is null OR \"MATERIAL_CATEGORY\" = '') "
+        "AND \"Item_Number\" like '%TJ%' "
+        "AND \"Item_Number\" not like '%CMTJ%'"
     )
     df = fetch_allparts(
         filter_expr=filter_expr,
@@ -176,7 +177,7 @@ def fetch_distinct_categories(force_refresh: bool = False) -> pd.DataFrame:
             from core.denodo_client import fetch_allparts
             logger.info("Fetching distinct categories from Denodo...")
             df = fetch_allparts(
-                filter_expr="MATERIAL_CATEGORY is not null AND MATERIAL_CATEGORY <> ''",
+                filter_expr="\"MATERIAL_CATEGORY\" is not null AND \"MATERIAL_CATEGORY\" <> ''",
                 select=["ZZMCATG_M", "ZZMCATG_S", "CATE_M_NAME", "CATE_S_NAME", "MATERIAL_CATEGORY"],
                 group_by=["ZZMCATG_M", "ZZMCATG_S", "CATE_M_NAME", "CATE_S_NAME", "MATERIAL_CATEGORY"],
             )
@@ -278,7 +279,7 @@ def fetch_manufacture_for_items(item_numbers: list[str]) -> pd.DataFrame:
             for item_no in remaining:
                 try:
                     df = fetch_manufacture_small(
-                        filter_expr=f"ITEM_NUMBER = '{item_no}'",
+                        filter_expr=f"\"ITEM_NUMBER\" = '{item_no}'",
                         select=["ITEM_NUMBER", "MANUFACTURE_NAME", "MFR_PART_NUMBER"],
                     )
                     if not df.empty:
@@ -312,14 +313,17 @@ def fetch_manufacture_for_items(item_numbers: list[str]) -> pd.DataFrame:
 # 5. Item info (for manual lookup)
 # ---------------------------------------------------------------------------
 
-def fetch_items_info(item_numbers: list[str]) -> pd.DataFrame:
+def fetch_items_info(item_numbers: list[str], use_cache: bool = True) -> pd.DataFrame:
     """
     Returns Item_Desc, LifeCycle_Phase, MATERIAL_CATEGORY for specific items.
 
-    Priority:
+    Priority (when use_cache=True):
       1. Local Parquet cache (fast, no network)
       2. Denodo REST API (batched, 10 items per request)
       3. Power BI Desktop (fallback)
+
+    use_cache=False skips local Parquet caches entirely and always hits Denodo.
+    Used by KPI code paths that need live status (e.g. per-item MATERIAL_CATEGORY).
     """
     if not item_numbers:
         return pd.DataFrame()
@@ -327,7 +331,7 @@ def fetch_items_info(item_numbers: list[str]) -> pd.DataFrame:
     item_set = set(item_numbers)
 
     # --- Try local cache first (fastest) ---
-    if os.path.exists(_TARGET_CACHE_FILE):
+    if use_cache and os.path.exists(_TARGET_CACHE_FILE):
         try:
             cache_df = pd.read_parquet(_TARGET_CACHE_FILE)
             needed_cols = ["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"]
@@ -347,7 +351,7 @@ def fetch_items_info(item_numbers: list[str]) -> pd.DataFrame:
             logger.debug("Cache read failed: %s", e)
 
     # Also check refpool cache (items with existing categories)
-    if os.path.exists(_REFPOOL_CACHE_FILE) and item_set:
+    if use_cache and os.path.exists(_REFPOOL_CACHE_FILE) and item_set:
         try:
             refpool_df = pd.read_parquet(_REFPOOL_CACHE_FILE)
             needed_cols = ["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"]
@@ -376,7 +380,7 @@ def fetch_items_info(item_numbers: list[str]) -> pd.DataFrame:
             for i in range(0, len(item_numbers), DENODO_BATCH):
                 batch = item_numbers[i:i + DENODO_BATCH]
                 items_str = ",".join(f"'{n}'" for n in batch)
-                filter_expr = f"Item_Number IN ({items_str})"
+                filter_expr = f"\"Item_Number\" IN ({items_str})"
                 df = fetch_allparts(
                     filter_expr=filter_expr,
                     select=["Item_Number", "Item_Desc", "LifeCycle_Phase", "MATERIAL_CATEGORY"],
@@ -427,13 +431,13 @@ def fetch_atj_reference_pool(force_refresh: bool = False) -> pd.DataFrame:
 
             # Manufacture data: ATJ items with MPN
             mfr_df = fetch_manufacture(
-                filter_expr="MANUFACTURE_NAME = 'ATJ' AND MFR_PART_NUMBER is not null AND MFR_PART_NUMBER <> ''",
+                filter_expr="\"MANUFACTURE_NAME\" = 'ATJ' AND \"MFR_PART_NUMBER\" is not null AND \"MFR_PART_NUMBER\" <> ''",
                 select=["ITEM_NUMBER", "MANUFACTURE_NAME", "MFR_PART_NUMBER"],
             )
 
             # Allparts: items with MATERIAL_CATEGORY
             cat_df = fetch_allparts(
-                filter_expr="MATERIAL_CATEGORY is not null AND MATERIAL_CATEGORY <> ''",
+                filter_expr="\"MATERIAL_CATEGORY\" is not null AND \"MATERIAL_CATEGORY\" <> ''",
                 select=[
                     "Item_Number", "Item_Desc", "MATERIAL_CATEGORY",
                     "ZZMCATG_M", "ZZMCATG_S", "CATE_M_NAME", "CATE_S_NAME",
@@ -483,8 +487,8 @@ def fetch_all_atj_components() -> pd.DataFrame:
             from core.denodo_client import fetch_allparts
             logger.info("Fetching ALL ATJ components from Denodo for KPI...")
             filter_expr = (
-                "Item_Number like '%TJ%' "
-                "AND Item_Number not like '%CMTJ%'"
+                "\"Item_Number\" like '%TJ%' "
+                "AND \"Item_Number\" not like '%CMTJ%'"
             )
             df = fetch_allparts(
                 filter_expr=filter_expr,
@@ -536,6 +540,36 @@ def fetch_manufacture_for_items_batched(item_numbers: list[str], batch_size: int
         df = fetch_manufacture_for_items(batch)
         if not df.empty:
             frames.append(df)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def fetch_manufacture_bulk(item_numbers: list[str], batch_size: int = 500) -> pd.DataFrame:
+    """
+    Bulk-fetch MANUFACTURE_NAME + MFR_PART_NUMBER via Denodo IN-clause queries.
+    Much faster than fetch_manufacture_for_items_batched (which is per-item) when
+    the input list is in the thousands (KPI snapshots).
+    """
+    if not item_numbers:
+        return pd.DataFrame()
+
+    if not _denodo_available():
+        logger.warning("Denodo unavailable — fetch_manufacture_bulk returning empty")
+        return pd.DataFrame()
+
+    from core.denodo_client import fetch_manufacture
+    frames = []
+    for i in range(0, len(item_numbers), batch_size):
+        batch = item_numbers[i:i + batch_size]
+        items_str = ",".join(f"'{n}'" for n in batch)
+        try:
+            df = fetch_manufacture(
+                filter_expr=f"\"ITEM_NUMBER\" IN ({items_str})",
+                select=["ITEM_NUMBER", "MANUFACTURE_NAME", "MFR_PART_NUMBER"],
+            )
+            if not df.empty:
+                frames.append(df)
+        except Exception as e:
+            logger.warning("Denodo bulk manufacture batch failed (skipping): %s", e)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 

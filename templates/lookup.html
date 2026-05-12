@@ -245,6 +245,7 @@
   <a href="/">Batch Process</a>
   <a href="/lookup" class="active">Manual Lookup</a>
   <a href="/kpi">KPI Dashboard</a>
+  <a href="/feedback">CE Feedback</a>
 </nav>
 
 <main>
@@ -268,7 +269,13 @@
         <option value="10" selected>Top 10 categories</option>
       </select>
 
-      <button class="run-btn" id="run-btn" onclick="runLookup()">Material Categorize</button>
+      <label style="margin-top:12px">LLM provider</label>
+      <select id="llm-provider">
+        <option value="" disabled selected>Checking connections...</option>
+      </select>
+      <div id="llm-status" style="font-size:0.72rem;color:var(--muted);margin-top:4px;">Probing Azure OpenAI and Gemini...</div>
+
+      <button class="run-btn" id="run-btn" onclick="runLookup()" disabled>Material Categorize</button>
     </section>
 
     <section class="panel">
@@ -438,6 +445,11 @@ async function runLookup() {
   }
 
   const vectorTopK = parseInt(document.getElementById('vector-top-k').value);
+  const llmProvider = document.getElementById('llm-provider').value;
+  if (!llmProvider) {
+    alert('No LLM provider available. Both Azure OpenAI and Gemini failed connection test.');
+    return;
+  }
   const btn = document.getElementById('run-btn');
   btn.disabled = true; btn.textContent = 'Processing...';
 
@@ -452,7 +464,7 @@ async function runLookup() {
     const r = await fetch(`${API}/api/lookup/run`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ item_numbers: items, vector_top_k: vectorTopK })
+      body: JSON.stringify({ item_numbers: items, vector_top_k: vectorTopK, llm_provider: llmProvider })
     });
     const data = await r.json();
     currentJobId = data.job_id;
@@ -705,7 +717,58 @@ async function exportSelected() {
   btn.disabled = false; btn.textContent = 'Export Excel';
 }
 
+async function loadLlmStatus() {
+  const sel = document.getElementById('llm-provider');
+  const info = document.getElementById('llm-status');
+  const runBtn = document.getElementById('run-btn');
+  try {
+    const r = await fetch(`${API}/api/llm/status`);
+    const data = await r.json();
+    sel.innerHTML = '';
+    const providers = data.providers || {};
+    const order = ['azure', 'gemini'];
+    let firstOk = null;
+    const lines = [];
+    order.forEach(key => {
+      const p = providers[key];
+      if (!p) return;
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = p.label + (p.ok ? ` (${p.model})` : ' — unavailable');
+      if (!p.ok) {
+        opt.disabled = true;
+      } else if (firstOk === null) {
+        firstOk = key;
+      }
+      sel.appendChild(opt);
+      const dot = p.ok
+        ? '<span style="color:var(--success)">&#x25CF;</span>'
+        : '<span style="color:var(--danger)">&#x25CF;</span>';
+      const detail = p.ok ? p.model : (p.error || 'failed').slice(0, 80);
+      lines.push(`${dot} <strong>${p.label}</strong>: ${detail}`);
+    });
+    info.innerHTML = lines.join('<br>');
+    if (firstOk) {
+      // Prefer the configured default if it is healthy, otherwise the first OK provider.
+      const defaultKey = (data.default && providers[data.default] && providers[data.default].ok)
+        ? data.default : firstOk;
+      sel.value = defaultKey;
+      runBtn.disabled = false;
+    } else {
+      const noneOpt = document.createElement('option');
+      noneOpt.value = ''; noneOpt.disabled = true; noneOpt.selected = true;
+      noneOpt.textContent = 'No LLM available';
+      sel.prepend(noneOpt);
+      runBtn.disabled = true;
+    }
+  } catch(e) {
+    info.innerHTML = '<span style="color:var(--danger)">Could not reach /api/llm/status: ' + e.message + '</span>';
+    runBtn.disabled = true;
+  }
+}
+
 loadConfig();
+loadLlmStatus();
 </script>
 </body>
 </html>

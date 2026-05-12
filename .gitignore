@@ -53,11 +53,34 @@ data/batches/*
 # Test artifacts
 # ===========================
 tests/_last_test_result.xlsx
+# Internal probe / scratch scripts (leak project IDs and service-account names)
+tests/_*.py
+# CE-confirmed result snapshots — internal data
+tests/*.xlsx
 
 # ===========================
-# Phase I Excel (contains internal item data)
+# Phase I Excel + adjacent data (contain internal item data)
 # ===========================
 Phase_I_PUR_2024_2025.xlsx
+Phase_I_PUR_2024_2025_V*.xlsx
+Phase_I_Correct_Material_Category.xlsx
+error_list_pn.xlsx
+
+# ===========================
+# Run logs (regenerated on each rerun)
+# ===========================
+LogFile.xml
+phase1_batch_log.txt
+blank_rerun_log.txt
+medium_rerun_log.txt
+*_rerun_log.txt
+
+# ===========================
+# Google Vertex AI credentials (service-account JSON)
+# ===========================
+google_api/
+*-service-account*.json
+indigo-medium-*.json
 
 # ===========================
 # OpenAPI specs (large, optional reference)
